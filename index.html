@@ -613,8 +613,10 @@ function openModal(id) {
     <div class="modal-section">
       <div class="modal-section-label">Kontaktperson</div>
       <div class="modal-card">
-        <div style="font-weight:500; margin-bottom:3px;">${c.Contact || '–'}</div>
-        <div style="font-size:12px; color:var(--text3)">Kundansvarig: ${c._owner}</div>
+        <div class="modal-grid">
+          <div class="modal-field"><label>Kontakt</label><input id="edit-contact" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;" value="${c.Contact || ''}"></div>
+          <div class="modal-field"><label>Kundansvarig</label><input id="edit-owner" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;" value="${c._owner || ''}"></div>
+        </div>
       </div>
     </div>
 
@@ -622,17 +624,22 @@ function openModal(id) {
       <div class="modal-section-label">Licens</div>
       <div class="modal-card">
         <div class="modal-grid">
-          <div class="modal-field">
+       <div class="modal-field">
             <label>Start</label>
-            <span>${formatDate(c.LicenseStart)}</span>
+            <input id="edit-start" type="date" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;" value="${c.LicenseStart ? c.LicenseStart.substring(0,10) : ''}">
           </div>
           <div class="modal-field">
             <label>Slutar</label>
-            <span>${formatDate(c.LicenseEnd)}</span>
+            <input id="edit-end" type="date" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;" value="${c.LicenseEnd ? c.LicenseEnd.substring(0,10) : ''}">
           </div>
           <div class="modal-field">
             <label>Typ</label>
-            <span>${c.LicenseType || '–'}</span>
+            <select id="edit-type" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;">
+              <option ${c.LicenseType==='Team'?'selected':''}>Team</option>
+              <option ${c.LicenseType==='Enterprise'?'selected':''}>Enterprise</option>
+              <option ${c.LicenseType==='Trial'?'selected':''}>Trial</option>
+            </select>
+          </div>
           </div>
           <div class="modal-field">
             <label>ARR</label>
