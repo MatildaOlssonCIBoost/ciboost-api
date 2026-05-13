@@ -98,14 +98,13 @@ module.exports = async function (context, req) {
           .input('Id', sql.Int, id)
           .input('Company', sql.NVarChar, c.company)
           .input('Contact', sql.NVarChar, c.contact)
-          .input('Owner', sql.NVarChar, c.owner)
           .input('LicenseType', sql.NVarChar, c.licenseType)
           .input('LicenseStart', sql.Date, c.licenseStart || null)
           .input('LicenseEnd', sql.Date, c.licenseEnd || null)
           .input('ARR', sql.Int, c.arr)
           .input('Risk', sql.NVarChar, c.risk)
           .input('Notes', sql.NVarChar, c.notes)
-          .query('UPDATE Customers SET Company=@Company,Contact=@Contact,Owner=@Owner,LicenseType=@LicenseType,LicenseStart=@LicenseStart,LicenseEnd=@LicenseEnd,ARR=@ARR,Risk=@Risk,Notes=@Notes WHERE Id=@Id');
+          .query('UPDATE Customers SET Company=@Company,Contact=@Contact,LicenseType=@LicenseType,LicenseStart=@LicenseStart,LicenseEnd=@LicenseEnd,ARR=@ARR,Risk=@Risk,Notes=@Notes WHERE Id=@Id');
         return respond(context, 200, { message: 'Uppdaterad' });
       }
     }
