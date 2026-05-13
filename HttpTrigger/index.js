@@ -234,6 +234,26 @@ module.exports = async function (context, req) {
         return respond(context, 200, { message: 'Admins borttagna' });
       }
     }
+    // Customer Activities
+    if (path.startsWith('activities/customer/')) {
+      const customerId = path.split('/')[2];
+      if (method === 'GET') {
+        const result = await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('SELECT * FROM CustomerActivities WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const a = req.body;
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .input('Type', sql.NVarChar, a.type)
+          .input('Note', sql.NVarChar, a.note)
+          .input('CreatedBy', sql.NVarChar, a.createdBy)
+          .query('INSERT INTO CustomerActivities (CustomerId,Type,Note,CreatedBy) VALUES (@CustomerId,@Type,@Note,@CreatedBy)');
+        return respond(context, 201, { message: 'Aktivitet sparad' });
+      }
+    }
     return respond(context, 404, { message: 'Endpoint hittades inte' });
 
   } catch (err) {
