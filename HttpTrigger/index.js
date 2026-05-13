@@ -32,6 +32,7 @@ module.exports = async function (context, req) {
   try {
     const db = await getPool();
 
+    // Prospects
     if (path === 'prospects') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM Prospects ORDER BY CreatedAt DESC');
@@ -90,7 +91,85 @@ module.exports = async function (context, req) {
       }
     }
 
-   if (path.startsWith('customers/')) {
+    // Customer Teams - FÖRE customers/ PUT
+    if (path.startsWith('customers/') && path.includes('/teams')) {
+      const customerId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('SELECT * FROM CustomerTeams WHERE CustomerId=@CustomerId');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const t = req.body;
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .input('TeamName', sql.NVarChar, t.teamName)
+          .input('MeetingLeader1', sql.NVarChar, t.meetingLeader1)
+          .input('MeetingLeader1Email', sql.NVarChar, t.meetingLeader1Email)
+          .input('MeetingLeader2', sql.NVarChar, t.meetingLeader2)
+          .input('MeetingLeader2Email', sql.NVarChar, t.meetingLeader2Email)
+          .query('INSERT INTO CustomerTeams (CustomerId,TeamName,MeetingLeader1,MeetingLeader1Email,MeetingLeader2,MeetingLeader2Email) VALUES (@CustomerId,@TeamName,@MeetingLeader1,@MeetingLeader1Email,@MeetingLeader2,@MeetingLeader2Email)');
+        return respond(context, 201, { message: 'Team sparat' });
+      }
+      if (method === 'DELETE') {
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('DELETE FROM CustomerTeams WHERE CustomerId=@CustomerId');
+        return respond(context, 200, { message: 'Teams borttagna' });
+      }
+    }
+
+    // Customer Admins - FÖRE customers/ PUT
+    if (path.startsWith('customers/') && path.includes('/admins')) {
+      const customerId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('SELECT * FROM CustomerAdmins WHERE CustomerId=@CustomerId');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const a = req.body;
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .input('Name', sql.NVarChar, a.name)
+          .input('Email', sql.NVarChar, a.email)
+          .input('Phone', sql.NVarChar, a.phone)
+          .query('INSERT INTO CustomerAdmins (CustomerId,Name,Email,Phone) VALUES (@CustomerId,@Name,@Email,@Phone)');
+        return respond(context, 201, { message: 'Admin sparad' });
+      }
+      if (method === 'DELETE') {
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('DELETE FROM CustomerAdmins WHERE CustomerId=@CustomerId');
+        return respond(context, 200, { message: 'Admins borttagna' });
+      }
+    }
+
+    // Customer Activities - FÖRE customers/ PUT
+    if (path.startsWith('activities/customer/')) {
+      const customerId = path.split('/')[2];
+      if (method === 'GET') {
+        const result = await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('SELECT * FROM CustomerActivities WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const a = req.body;
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .input('Type', sql.NVarChar, a.type)
+          .input('Note', sql.NVarChar, a.note)
+          .input('CreatedBy', sql.NVarChar, a.createdBy)
+          .query('INSERT INTO CustomerActivities (CustomerId,Type,Note,CreatedBy) VALUES (@CustomerId,@Type,@Note,@CreatedBy)');
+        return respond(context, 201, { message: 'Aktivitet sparad' });
+      }
+    }
+
+    // Customer PUT
+    if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const c = req.body;
@@ -139,6 +218,7 @@ module.exports = async function (context, req) {
       }
     }
 
+    // Customers GET/POST
     if (path === 'customers') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM Customers ORDER BY LicenseEnd ASC');
@@ -162,6 +242,7 @@ module.exports = async function (context, req) {
       }
     }
 
+    // Prospect Activities
     if (path === 'activities' && method === 'POST') {
       const a = req.body;
       await db.request()
@@ -179,81 +260,7 @@ module.exports = async function (context, req) {
         .query('SELECT * FROM Activities WHERE ProspectId=@ProspectId ORDER BY CreatedAt DESC');
       return respond(context, 200, result.recordset);
     }
-// Customer Teams
-    if (path.startsWith('customers/') && path.includes('/teams')) {
-      const customerId = path.split('/')[1];
-      if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .query('SELECT * FROM CustomerTeams WHERE CustomerId=@CustomerId');
-        return respond(context, 200, result.recordset);
-      }
-      if (method === 'POST') {
-        const t = req.body;
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .input('TeamName', sql.NVarChar, t.teamName)
-          .input('MeetingLeader1', sql.NVarChar, t.meetingLeader1)
-          .input('MeetingLeader1Email', sql.NVarChar, t.meetingLeader1Email)
-          .input('MeetingLeader2', sql.NVarChar, t.meetingLeader2)
-          .input('MeetingLeader2Email', sql.NVarChar, t.meetingLeader2Email)
-          .query('INSERT INTO CustomerTeams (CustomerId,TeamName,MeetingLeader1,MeetingLeader1Email,MeetingLeader2,MeetingLeader2Email) VALUES (@CustomerId,@TeamName,@MeetingLeader1,@MeetingLeader1Email,@MeetingLeader2,@MeetingLeader2Email)');
-        return respond(context, 201, { message: 'Team sparat' });
-      }
-      if (method === 'DELETE') {
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .query('DELETE FROM CustomerTeams WHERE CustomerId=@CustomerId');
-        return respond(context, 200, { message: 'Teams borttagna' });
-      }
-    }
 
-    // Customer Admins
-    if (path.startsWith('customers/') && path.includes('/admins')) {
-      const customerId = path.split('/')[1];
-      if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .query('SELECT * FROM CustomerAdmins WHERE CustomerId=@CustomerId');
-        return respond(context, 200, result.recordset);
-      }
-      if (method === 'POST') {
-        const a = req.body;
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .input('Name', sql.NVarChar, a.name)
-          .input('Email', sql.NVarChar, a.email)
-          .input('Phone', sql.NVarChar, a.phone)
-          .query('INSERT INTO CustomerAdmins (CustomerId,Name,Email,Phone) VALUES (@CustomerId,@Name,@Email,@Phone)');
-        return respond(context, 201, { message: 'Admin sparad' });
-      }
-      if (method === 'DELETE') {
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .query('DELETE FROM CustomerAdmins WHERE CustomerId=@CustomerId');
-        return respond(context, 200, { message: 'Admins borttagna' });
-      }
-    }
-    // Customer Activities
-    if (path.startsWith('activities/customer/')) {
-      const customerId = path.split('/')[2];
-      if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .query('SELECT * FROM CustomerActivities WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
-        return respond(context, 200, result.recordset);
-      }
-      if (method === 'POST') {
-        const a = req.body;
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
-          .input('Type', sql.NVarChar, a.type)
-          .input('Note', sql.NVarChar, a.note)
-          .input('CreatedBy', sql.NVarChar, a.createdBy)
-          .query('INSERT INTO CustomerActivities (CustomerId,Type,Note,CreatedBy) VALUES (@CustomerId,@Type,@Note,@CreatedBy)');
-        return respond(context, 201, { message: 'Aktivitet sparad' });
-      }
-    }
     return respond(context, 404, { message: 'Endpoint hittades inte' });
 
   } catch (err) {
