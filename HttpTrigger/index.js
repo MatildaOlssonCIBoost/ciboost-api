@@ -90,7 +90,7 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('customers/')) {
+   if (path.startsWith('customers/')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const c = req.body;
@@ -98,13 +98,43 @@ module.exports = async function (context, req) {
           .input('Id', sql.Int, id)
           .input('Company', sql.NVarChar, c.company)
           .input('Contact', sql.NVarChar, c.contact)
+          .input('ContactRole', sql.NVarChar, c.contactRole)
+          .input('ContactEmail', sql.NVarChar, c.contactEmail)
+          .input('ContactPhone', sql.NVarChar, c.contactPhone)
+          .input('CustomerSince', sql.Date, c.customerSince || null)
           .input('LicenseType', sql.NVarChar, c.licenseType)
           .input('LicenseStart', sql.Date, c.licenseStart || null)
           .input('LicenseEnd', sql.Date, c.licenseEnd || null)
           .input('ARR', sql.Int, c.arr)
+          .input('ARR_Fixed', sql.Int, c.arrFixed)
+          .input('Revenue_Training', sql.Int, c.revenueTraining)
+          .input('Revenue_Consulting', sql.Int, c.revenueConsulting)
           .input('Risk', sql.NVarChar, c.risk)
+          .input('TeamName', sql.NVarChar, c.teamName)
+          .input('MeetingLeader1', sql.NVarChar, c.meetingLeader1)
+          .input('MeetingLeader1Email', sql.NVarChar, c.meetingLeader1Email)
+          .input('MeetingLeader1Phone', sql.NVarChar, c.meetingLeader1Phone)
+          .input('MeetingLeader2', sql.NVarChar, c.meetingLeader2)
+          .input('MeetingLeader2Email', sql.NVarChar, c.meetingLeader2Email)
+          .input('MeetingLeader2Phone', sql.NVarChar, c.meetingLeader2Phone)
+          .input('CommissionSalesperson', sql.NVarChar, c.commissionSalesperson)
+          .input('CommissionPercent', sql.Decimal(5,2), c.commissionPercent)
+          .input('CommissionAmount', sql.Int, c.commissionAmount)
           .input('Notes', sql.NVarChar, c.notes)
-          .query('UPDATE Customers SET Company=@Company,Contact=@Contact,LicenseType=@LicenseType,LicenseStart=@LicenseStart,LicenseEnd=@LicenseEnd,ARR=@ARR,Risk=@Risk,Notes=@Notes WHERE Id=@Id');
+          .query(`UPDATE Customers SET 
+            Company=@Company, Contact=@Contact, ContactRole=@ContactRole,
+            ContactEmail=@ContactEmail, ContactPhone=@ContactPhone,
+            CustomerSince=@CustomerSince, LicenseType=@LicenseType,
+            LicenseStart=@LicenseStart, LicenseEnd=@LicenseEnd,
+            ARR=@ARR, ARR_Fixed=@ARR_Fixed, Revenue_Training=@Revenue_Training,
+            Revenue_Consulting=@Revenue_Consulting, Risk=@Risk,
+            TeamName=@TeamName, MeetingLeader1=@MeetingLeader1,
+            MeetingLeader1Email=@MeetingLeader1Email, MeetingLeader1Phone=@MeetingLeader1Phone,
+            MeetingLeader2=@MeetingLeader2, MeetingLeader2Email=@MeetingLeader2Email,
+            MeetingLeader2Phone=@MeetingLeader2Phone,
+            CommissionSalesperson=@CommissionSalesperson, CommissionPercent=@CommissionPercent,
+            CommissionAmount=@CommissionAmount, Notes=@Notes
+            WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
     }
