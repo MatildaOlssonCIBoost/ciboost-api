@@ -1,4 +1,4 @@
-const corsHeaders = {
+﻿const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
@@ -87,6 +87,26 @@ module.exports = async function (context, req) {
         await db.request().input('Id', sql.Int, id)
           .query('DELETE FROM Activities WHERE ProspectId=@Id; DELETE FROM Prospects WHERE Id=@Id');
         return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    if (path.startsWith('customers/')) {
+      const id = path.split('/')[1];
+      if (method === 'PUT') {
+        const c = req.body;
+        await db.request()
+          .input('Id', sql.Int, id)
+          .input('Company', sql.NVarChar, c.company)
+          .input('Contact', sql.NVarChar, c.contact)
+          .input('Owner', sql.NVarChar, c.owner)
+          .input('LicenseType', sql.NVarChar, c.licenseType)
+          .input('LicenseStart', sql.Date, c.licenseStart || null)
+          .input('LicenseEnd', sql.Date, c.licenseEnd || null)
+          .input('ARR', sql.Int, c.arr)
+          .input('Risk', sql.NVarChar, c.risk)
+          .input('Notes', sql.NVarChar, c.notes)
+          .query('UPDATE Customers SET Company=@Company,Contact=@Contact,Owner=@Owner,LicenseType=@LicenseType,LicenseStart=@LicenseStart,LicenseEnd=@LicenseEnd,ARR=@ARR,Risk=@Risk,Notes=@Notes WHERE Id=@Id');
+        return respond(context, 200, { message: 'Uppdaterad' });
       }
     }
 
