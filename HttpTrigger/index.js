@@ -164,7 +164,55 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins')) {
+    // CustomerRevenues
+    if (path.startsWith('customers/') && path.includes('/revenues')) {
+      const customerId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .query('SELECT * FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY DateFrom ASC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const r = req.body;
+        await db.request()
+          .input('CustomerId', sql.Int, customerId)
+          .input('Type', sql.NVarChar, r.type)
+          .input('Amount', sql.Int, r.amount)
+          .input('DateFrom', sql.Date, r.dateFrom || null)
+          .input('DateTo', sql.Date, r.dateTo || null)
+          .input('Description', sql.NVarChar, r.description || null)
+          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description)');
+        return respond(context, 201, { message: 'Intäkt sparad' });
+      }
+      if (method === 'DELETE') {
+        const revenueId = path.split('/')[3];
+        if (revenueId) {
+          await db.request()
+            .input('Id', sql.Int, revenueId)
+            .query('DELETE FROM CustomerRevenues WHERE Id=@Id');
+        } else {
+          await db.request()
+            .input('CustomerId', sql.Int, customerId)
+            .query('DELETE FROM CustomerRevenues WHERE CustomerId=@CustomerId');
+        }
+        return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    // Alla revenues (för finansiell vy)
+    if (path === 'revenues') {
+      if (method === 'GET') {
+        const result = await db.request()
+          .query(`SELECT cr.*, c.Company, c.SubName, c.Owner, c.LicenseStart, c.LicenseEnd, c.ARR, c.ARR_Fixed
+                  FROM CustomerRevenues cr
+                  JOIN Customers c ON cr.CustomerId = c.Id
+                  ORDER BY cr.DateFrom ASC`);
+        return respond(context, 200, result.recordset);
+      }
+    }
+
+    if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins') && !path.includes('/revenues')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const c = req.body;
@@ -198,6 +246,7 @@ module.exports = async function (context, req) {
           .input('CommissionPercent', sql.Decimal(5,2), c.commissionPercent)
           .input('CommissionAmount', sql.Int, c.commissionAmount)
           .input('Notes', sql.NVarChar, c.notes)
+          .input('Owner', sql.NVarChar, c.owner)
           .query(`UPDATE Customers SET
             Company=@Company, SubName=@SubName, Contact=@Contact, ContactRole=@ContactRole,
             ContactEmail=@ContactEmail, ContactPhone=@ContactPhone,
@@ -211,7 +260,7 @@ module.exports = async function (context, req) {
             MeetingLeader1Phone=@MeetingLeader1Phone, MeetingLeader2=@MeetingLeader2,
             MeetingLeader2Email=@MeetingLeader2Email, MeetingLeader2Phone=@MeetingLeader2Phone,
             CommissionSalesperson=@CommissionSalesperson, CommissionPercent=@CommissionPercent,
-            CommissionAmount=@CommissionAmount, Notes=@Notes
+            CommissionAmount=@CommissionAmount, Notes=@Notes, Owner=@Owner
             WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
@@ -222,6 +271,7 @@ module.exports = async function (context, req) {
             DELETE FROM CustomerTeams WHERE CustomerId=@Id;
             DELETE FROM CustomerAdmins WHERE CustomerId=@Id;
             DELETE FROM CustomerActivities WHERE CustomerId=@Id;
+            DELETE FROM CustomerRevenues WHERE CustomerId=@Id;
             DELETE FROM Customers WHERE Id=@Id
           `);
         return respond(context, 200, { message: 'Kund borttagen' });
