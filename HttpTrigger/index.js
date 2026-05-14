@@ -93,8 +93,7 @@ module.exports = async function (context, req) {
     if (path.startsWith('customers/') && path.includes('/teams')) {
       const customerId = path.split('/')[1];
       if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
+        const result = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT * FROM CustomerTeams WHERE CustomerId=@CustomerId');
         return respond(context, 200, result.recordset);
       }
@@ -111,8 +110,7 @@ module.exports = async function (context, req) {
         return respond(context, 201, { message: 'Team sparat' });
       }
       if (method === 'DELETE') {
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
+        await db.request().input('CustomerId', sql.Int, customerId)
           .query('DELETE FROM CustomerTeams WHERE CustomerId=@CustomerId');
         return respond(context, 200, { message: 'Teams borttagna' });
       }
@@ -121,8 +119,7 @@ module.exports = async function (context, req) {
     if (path.startsWith('customers/') && path.includes('/admins')) {
       const customerId = path.split('/')[1];
       if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
+        const result = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT * FROM CustomerAdmins WHERE CustomerId=@CustomerId');
         return respond(context, 200, result.recordset);
       }
@@ -137,8 +134,7 @@ module.exports = async function (context, req) {
         return respond(context, 201, { message: 'Admin sparad' });
       }
       if (method === 'DELETE') {
-        await db.request()
-          .input('CustomerId', sql.Int, customerId)
+        await db.request().input('CustomerId', sql.Int, customerId)
           .query('DELETE FROM CustomerAdmins WHERE CustomerId=@CustomerId');
         return respond(context, 200, { message: 'Admins borttagna' });
       }
@@ -147,8 +143,7 @@ module.exports = async function (context, req) {
     if (path.startsWith('activities/customer/')) {
       const customerId = path.split('/')[2];
       if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
+        const result = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT * FROM CustomerActivities WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
         return respond(context, 200, result.recordset);
       }
@@ -164,12 +159,71 @@ module.exports = async function (context, req) {
       }
     }
 
+    // CustomerCommissions per revenue
+    if (path.startsWith('revenues/') && path.includes('/commissions')) {
+      const revenueId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request().input('RevenueId', sql.Int, revenueId)
+          .query('SELECT * FROM CustomerCommissions WHERE RevenueId=@RevenueId ORDER BY CreatedAt ASC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const c = req.body;
+        await db.request()
+          .input('RevenueId', sql.Int, revenueId)
+          .input('CustomerId', sql.Int, c.customerId)
+          .input('Recipient', sql.NVarChar, c.recipient)
+          .input('CommissionPercent', sql.Decimal(5,2), c.commissionPercent || null)
+          .input('Amount', sql.Int, c.amount)
+          .input('Notes', sql.NVarChar, c.notes || null)
+          .query('INSERT INTO CustomerCommissions (RevenueId,CustomerId,Recipient,CommissionPercent,Amount,Notes) VALUES (@RevenueId,@CustomerId,@Recipient,@CommissionPercent,@Amount,@Notes)');
+        return respond(context, 201, { message: 'Provision sparad' });
+      }
+      if (method === 'DELETE') {
+        await db.request().input('RevenueId', sql.Int, revenueId)
+          .query('DELETE FROM CustomerCommissions WHERE RevenueId=@RevenueId');
+        return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    // Enskild provision – PUT (markera utbetald) och DELETE
+    if (path.startsWith('commissions/')) {
+      const commId = path.split('/')[1];
+      if (method === 'PUT') {
+        const c = req.body;
+        await db.request()
+          .input('Id', sql.Int, commId)
+          .input('PaidOut', sql.Int, c.paidOut || 0)
+          .input('PaidOutDate', sql.Date, c.paidOutDate || null)
+          .query('UPDATE CustomerCommissions SET PaidOut=@PaidOut, PaidOutDate=@PaidOutDate WHERE Id=@Id');
+        return respond(context, 200, { message: 'Uppdaterad' });
+      }
+      if (method === 'DELETE') {
+        await db.request().input('Id', sql.Int, commId)
+          .query('DELETE FROM CustomerCommissions WHERE Id=@Id');
+        return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    // Alla provisioner (för finansiell vy)
+    if (path === 'commissions') {
+      if (method === 'GET') {
+        const result = await db.request().query(`
+          SELECT cc.*, cr.Type as RevenueType, cr.Amount as RevenueAmount,
+                 c.Company, c.SubName
+          FROM CustomerCommissions cc
+          JOIN CustomerRevenues cr ON cc.RevenueId = cr.Id
+          JOIN Customers c ON cc.CustomerId = c.Id
+          ORDER BY cc.CreatedAt DESC`);
+        return respond(context, 200, result.recordset);
+      }
+    }
+
     // CustomerRevenues
     if (path.startsWith('customers/') && path.includes('/revenues')) {
       const customerId = path.split('/')[1];
       if (method === 'GET') {
-        const result = await db.request()
-          .input('CustomerId', sql.Int, customerId)
+        const result = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT * FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY DateFrom ASC');
         return respond(context, 200, result.recordset);
       }
@@ -183,31 +237,30 @@ module.exports = async function (context, req) {
           .input('DateTo', sql.Date, r.dateTo || null)
           .input('Description', sql.NVarChar, r.description || null)
           .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description)');
-        return respond(context, 201, { message: 'Intäkt sparad' });
+        const inserted = await db.request().input('CustomerId', sql.Int, customerId)
+          .query('SELECT TOP 1 Id FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
+        return respond(context, 201, { message: 'Intäkt sparad', id: inserted.recordset[0]?.Id });
       }
       if (method === 'DELETE') {
         const revenueId = path.split('/')[3];
         if (revenueId) {
-          await db.request()
-            .input('Id', sql.Int, revenueId)
-            .query('DELETE FROM CustomerRevenues WHERE Id=@Id');
+          await db.request().input('Id', sql.Int, revenueId)
+            .query('DELETE FROM CustomerCommissions WHERE RevenueId=@Id; DELETE FROM CustomerRevenues WHERE Id=@Id');
         } else {
-          await db.request()
-            .input('CustomerId', sql.Int, customerId)
-            .query('DELETE FROM CustomerRevenues WHERE CustomerId=@CustomerId');
+          await db.request().input('CustomerId', sql.Int, customerId)
+            .query('DELETE FROM CustomerCommissions WHERE CustomerId=@CustomerId; DELETE FROM CustomerRevenues WHERE CustomerId=@CustomerId');
         }
         return respond(context, 200, { message: 'Borttagen' });
       }
     }
 
-    // Alla revenues (för finansiell vy)
     if (path === 'revenues') {
       if (method === 'GET') {
-        const result = await db.request()
-          .query(`SELECT cr.*, c.Company, c.SubName, c.Owner, c.LicenseStart, c.LicenseEnd, c.ARR, c.ARR_Fixed
-                  FROM CustomerRevenues cr
-                  JOIN Customers c ON cr.CustomerId = c.Id
-                  ORDER BY cr.DateFrom ASC`);
+        const result = await db.request().query(`
+          SELECT cr.*, c.Company, c.SubName, c.Owner, c.LicenseStart, c.LicenseEnd
+          FROM CustomerRevenues cr
+          JOIN Customers c ON cr.CustomerId = c.Id
+          ORDER BY cr.DateFrom ASC`);
         return respond(context, 200, result.recordset);
       }
     }
@@ -265,15 +318,13 @@ module.exports = async function (context, req) {
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
-        await db.request()
-          .input('Id', sql.Int, id)
-          .query(`
-            DELETE FROM CustomerTeams WHERE CustomerId=@Id;
-            DELETE FROM CustomerAdmins WHERE CustomerId=@Id;
-            DELETE FROM CustomerActivities WHERE CustomerId=@Id;
-            DELETE FROM CustomerRevenues WHERE CustomerId=@Id;
-            DELETE FROM Customers WHERE Id=@Id
-          `);
+        await db.request().input('Id', sql.Int, id).query(`
+          DELETE FROM CustomerCommissions WHERE CustomerId=@Id;
+          DELETE FROM CustomerTeams WHERE CustomerId=@Id;
+          DELETE FROM CustomerAdmins WHERE CustomerId=@Id;
+          DELETE FROM CustomerActivities WHERE CustomerId=@Id;
+          DELETE FROM CustomerRevenues WHERE CustomerId=@Id;
+          DELETE FROM Customers WHERE Id=@Id`);
         return respond(context, 200, { message: 'Kund borttagen' });
       }
     }
@@ -304,6 +355,20 @@ module.exports = async function (context, req) {
           .query(`INSERT INTO Customers (Company,Contact,Owner,SubName,LicenseType,LicenseStart,LicenseEnd,ARR,ARR_Fixed,Revenue_Training,Revenue_Training_Date,Revenue_Consulting,Revenue_Consulting_Date,Risk,Notes)
                   VALUES (@Company,@Contact,@Owner,@SubName,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@ARR_Fixed,@Revenue_Training,@Revenue_Training_Date,@Revenue_Consulting,@Revenue_Consulting_Date,@Risk,@Notes)`);
         return respond(context, 201, { message: 'Kund skapad' });
+      }
+    }
+
+    // Commission recipients (för dropdown)
+    if (path === 'commission-recipients') {
+      if (method === 'GET') {
+        const result = await db.request().query('SELECT * FROM CommissionRecipients ORDER BY Name ASC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const r = req.body;
+        await db.request().input('Name', sql.NVarChar, r.name)
+          .query('INSERT INTO CommissionRecipients (Name) VALUES (@Name)');
+        return respond(context, 201, { message: 'Mottagare skapad' });
       }
     }
 
