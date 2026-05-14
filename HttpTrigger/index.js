@@ -32,7 +32,6 @@ module.exports = async function (context, req) {
   try {
     const db = await getPool();
 
-    // Prospects
     if (path === 'prospects') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM Prospects ORDER BY CreatedAt DESC');
@@ -91,7 +90,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Customer Teams - FÖRE customers/ PUT
     if (path.startsWith('customers/') && path.includes('/teams')) {
       const customerId = path.split('/')[1];
       if (method === 'GET') {
@@ -120,7 +118,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Customer Admins - FÖRE customers/ PUT
     if (path.startsWith('customers/') && path.includes('/admins')) {
       const customerId = path.split('/')[1];
       if (method === 'GET') {
@@ -147,7 +144,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Customer Activities - FÖRE customers/ PUT
     if (path.startsWith('activities/customer/')) {
       const customerId = path.split('/')[2];
       if (method === 'GET') {
@@ -168,8 +164,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Customer PUT
-    // Customer PUT
     if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
@@ -189,7 +183,9 @@ module.exports = async function (context, req) {
           .input('ARR', sql.Int, c.arr)
           .input('ARR_Fixed', sql.Int, c.arrFixed)
           .input('Revenue_Training', sql.Int, c.revenueTraining)
+          .input('Revenue_Training_Date', sql.Date, c.revenueTrainingDate || null)
           .input('Revenue_Consulting', sql.Int, c.revenueConsulting)
+          .input('Revenue_Consulting_Date', sql.Date, c.revenueConsultingDate || null)
           .input('Risk', sql.NVarChar, c.risk)
           .input('TeamName', sql.NVarChar, c.teamName)
           .input('MeetingLeader1', sql.NVarChar, c.meetingLeader1)
@@ -202,17 +198,18 @@ module.exports = async function (context, req) {
           .input('CommissionPercent', sql.Decimal(5,2), c.commissionPercent)
           .input('CommissionAmount', sql.Int, c.commissionAmount)
           .input('Notes', sql.NVarChar, c.notes)
-          .query(`UPDATE Customers SET 
-             Company=@Company, SubName=@SubName, Contact=@Contact, ContactRole=@ContactRole,
+          .query(`UPDATE Customers SET
+            Company=@Company, SubName=@SubName, Contact=@Contact, ContactRole=@ContactRole,
             ContactEmail=@ContactEmail, ContactPhone=@ContactPhone,
             CustomerSince=@CustomerSince, LicenseType=@LicenseType,
             LicenseStart=@LicenseStart, LicenseEnd=@LicenseEnd,
-            ARR=@ARR, ARR_Fixed=@ARR_Fixed, Revenue_Training=@Revenue_Training,
-            Revenue_Consulting=@Revenue_Consulting, Risk=@Risk,
-            TeamName=@TeamName, MeetingLeader1=@MeetingLeader1,
-            MeetingLeader1Email=@MeetingLeader1Email, MeetingLeader1Phone=@MeetingLeader1Phone,
-            MeetingLeader2=@MeetingLeader2, MeetingLeader2Email=@MeetingLeader2Email,
-            MeetingLeader2Phone=@MeetingLeader2Phone,
+            ARR=@ARR, ARR_Fixed=@ARR_Fixed,
+            Revenue_Training=@Revenue_Training, Revenue_Training_Date=@Revenue_Training_Date,
+            Revenue_Consulting=@Revenue_Consulting, Revenue_Consulting_Date=@Revenue_Consulting_Date,
+            Risk=@Risk, TeamName=@TeamName,
+            MeetingLeader1=@MeetingLeader1, MeetingLeader1Email=@MeetingLeader1Email,
+            MeetingLeader1Phone=@MeetingLeader1Phone, MeetingLeader2=@MeetingLeader2,
+            MeetingLeader2Email=@MeetingLeader2Email, MeetingLeader2Phone=@MeetingLeader2Phone,
             CommissionSalesperson=@CommissionSalesperson, CommissionPercent=@CommissionPercent,
             CommissionAmount=@CommissionAmount, Notes=@Notes
             WHERE Id=@Id`);
@@ -230,18 +227,7 @@ module.exports = async function (context, req) {
         return respond(context, 200, { message: 'Kund borttagen' });
       }
     }
-if (method === 'DELETE') {
-        await db.request()
-          .input('Id', sql.Int, id)
-          .query(`
-            DELETE FROM CustomerTeams WHERE CustomerId=@Id;
-            DELETE FROM CustomerAdmins WHERE CustomerId=@Id;
-            DELETE FROM CustomerActivities WHERE CustomerId=@Id;
-            DELETE FROM Customers WHERE Id=@Id
-          `);
-        return respond(context, 200, { message: 'Kund borttagen' });
-      }
-    // Customers GET/POST
+
     if (path === 'customers') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM Customers ORDER BY LicenseEnd ASC');
@@ -252,20 +238,25 @@ if (method === 'DELETE') {
         await db.request()
           .input('Company', sql.NVarChar, c.company)
           .input('Contact', sql.NVarChar, c.contact)
-          .input('Source', sql.NVarChar, c.source)
+          .input('Owner', sql.NVarChar, c.owner)
+          .input('SubName', sql.NVarChar, c.subName)
           .input('LicenseType', sql.NVarChar, c.licenseType)
           .input('LicenseStart', sql.Date, c.licenseStart || null)
           .input('LicenseEnd', sql.Date, c.licenseEnd || null)
           .input('ARR', sql.Int, c.arr)
+          .input('ARR_Fixed', sql.Int, c.arrFixed)
+          .input('Revenue_Training', sql.Int, c.revenueTraining)
+          .input('Revenue_Training_Date', sql.Date, c.revenueTrainingDate || null)
+          .input('Revenue_Consulting', sql.Int, c.revenueConsulting)
+          .input('Revenue_Consulting_Date', sql.Date, c.revenueConsultingDate || null)
           .input('Risk', sql.NVarChar, c.risk)
           .input('Notes', sql.NVarChar, c.notes)
-          .query(`INSERT INTO Customers (Company,Contact,Source,LicenseType,LicenseStart,LicenseEnd,ARR,Risk,Notes)
-                  VALUES (@Company,@Contact,@Source,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@Risk,@Notes)`);
+          .query(`INSERT INTO Customers (Company,Contact,Owner,SubName,LicenseType,LicenseStart,LicenseEnd,ARR,ARR_Fixed,Revenue_Training,Revenue_Training_Date,Revenue_Consulting,Revenue_Consulting_Date,Risk,Notes)
+                  VALUES (@Company,@Contact,@Owner,@SubName,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@ARR_Fixed,@Revenue_Training,@Revenue_Training_Date,@Revenue_Consulting,@Revenue_Consulting_Date,@Risk,@Notes)`);
         return respond(context, 201, { message: 'Kund skapad' });
       }
     }
 
-    // Prospect Activities
     if (path === 'activities' && method === 'POST') {
       const a = req.body;
       await db.request()
@@ -294,10 +285,7 @@ if (method === 'DELETE') {
 function respond(context, status, body) {
   context.res = {
     status,
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json'
-    },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   };
 }
