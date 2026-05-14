@@ -176,6 +176,7 @@ module.exports = async function (context, req) {
         await db.request()
           .input('Id', sql.Int, id)
           .input('Company', sql.NVarChar, c.company)
+          .input('SubName', sql.NVarChar, c.subName)
           .input('Contact', sql.NVarChar, c.contact)
           .input('ContactRole', sql.NVarChar, c.contactRole)
           .input('ContactEmail', sql.NVarChar, c.contactEmail)
@@ -201,7 +202,7 @@ module.exports = async function (context, req) {
           .input('CommissionAmount', sql.Int, c.commissionAmount)
           .input('Notes', sql.NVarChar, c.notes)
           .query(`UPDATE Customers SET 
-            Company=@Company, Contact=@Contact, ContactRole=@ContactRole,
+             Company=@Company, SubName=@SubName, Contact=@Contact, ContactRole=@ContactRole,
             ContactEmail=@ContactEmail, ContactPhone=@ContactPhone,
             CustomerSince=@CustomerSince, LicenseType=@LicenseType,
             LicenseStart=@LicenseStart, LicenseEnd=@LicenseEnd,
