@@ -159,7 +159,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // CustomerCommissions per revenue
     if (path.startsWith('revenues/') && path.includes('/commissions')) {
       const revenueId = path.split('/')[1];
       if (method === 'GET') {
@@ -186,7 +185,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Enskild provision – PUT (markera utbetald) och DELETE
     if (path.startsWith('commissions/')) {
       const commId = path.split('/')[1];
       if (method === 'PUT') {
@@ -205,12 +203,10 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Alla provisioner (för finansiell vy)
     if (path === 'commissions') {
       if (method === 'GET') {
         const result = await db.request().query(`
-          SELECT cc.*, cr.Type as RevenueType, cr.Amount as RevenueAmount,
-                 c.Company, c.SubName
+          SELECT cc.*, cr.Type as RevenueType, cr.Amount as RevenueAmount, c.Company, c.SubName
           FROM CustomerCommissions cc
           JOIN CustomerRevenues cr ON cc.RevenueId = cr.Id
           JOIN Customers c ON cc.CustomerId = c.Id
@@ -219,7 +215,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // CustomerRevenues
     if (path.startsWith('customers/') && path.includes('/revenues')) {
       const customerId = path.split('/')[1];
       if (method === 'GET') {
@@ -240,6 +235,19 @@ module.exports = async function (context, req) {
         const inserted = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT TOP 1 Id FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
         return respond(context, 201, { message: 'Intäkt sparad', id: inserted.recordset[0]?.Id });
+      }
+      if (method === 'PUT') {
+        const revenueId = path.split('/')[3];
+        const r = req.body;
+        await db.request()
+          .input('Id', sql.Int, revenueId)
+          .input('Type', sql.NVarChar, r.type)
+          .input('Amount', sql.Int, r.amount)
+          .input('DateFrom', sql.Date, r.dateFrom || null)
+          .input('DateTo', sql.Date, r.dateTo || null)
+          .input('Description', sql.NVarChar, r.description || null)
+          .query('UPDATE CustomerRevenues SET Type=@Type,Amount=@Amount,DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description WHERE Id=@Id');
+        return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
         const revenueId = path.split('/')[3];
@@ -358,7 +366,6 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Commission recipients (för dropdown)
     if (path === 'commission-recipients') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM CommissionRecipients ORDER BY Name ASC');
