@@ -169,6 +169,7 @@ module.exports = async function (context, req) {
     }
 
     // Customer PUT
+    // Customer PUT
     if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
@@ -217,8 +218,29 @@ module.exports = async function (context, req) {
             WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
+      if (method === 'DELETE') {
+        await db.request()
+          .input('Id', sql.Int, id)
+          .query(`
+            DELETE FROM CustomerTeams WHERE CustomerId=@Id;
+            DELETE FROM CustomerAdmins WHERE CustomerId=@Id;
+            DELETE FROM CustomerActivities WHERE CustomerId=@Id;
+            DELETE FROM Customers WHERE Id=@Id
+          `);
+        return respond(context, 200, { message: 'Kund borttagen' });
+      }
     }
-
+if (method === 'DELETE') {
+        await db.request()
+          .input('Id', sql.Int, id)
+          .query(`
+            DELETE FROM CustomerTeams WHERE CustomerId=@Id;
+            DELETE FROM CustomerAdmins WHERE CustomerId=@Id;
+            DELETE FROM CustomerActivities WHERE CustomerId=@Id;
+            DELETE FROM Customers WHERE Id=@Id
+          `);
+        return respond(context, 200, { message: 'Kund borttagen' });
+      }
     // Customers GET/POST
     if (path === 'customers') {
       if (method === 'GET') {
