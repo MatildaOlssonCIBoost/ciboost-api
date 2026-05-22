@@ -3,26 +3,8 @@
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
 };
-async function validateToken(req) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-  try {
-    const tenantId = process.env.AZURE_TENANT_ID;
-    const clientId = process.env.AZURE_CLIENT_ID;
-    const keysUrl = `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`;
-    const keysRes = await fetch(keysUrl);
-    const keys = await keysRes.json();
-    const parts = token.split('.');
-    if (parts.length !== 3) return false;
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-    if (payload.aud !== clientId && payload.aud !== `api://${clientId}`) return false;
-    if (payload.exp < Math.floor(Date.now() / 1000)) return false;
-    return true;
-  } catch(e) { return false; }
-}
-const sql = require('mssql');
 
+const sql = require('mssql');
 const config = {
   server: 'ciboost-server.database.windows.net',
   database: 'ciboost-db',
@@ -30,7 +12,6 @@ const config = {
   password: process.env.DB_PASSWORD,
   options: { encrypt: true, trustServerCertificate: false }
 };
-
 let pool;
 async function getPool() {
   if (!pool) pool = await sql.connect(config);
@@ -52,45 +33,6 @@ module.exports = async function (context, req) {
     if (path === 'prospects') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM Prospects ORDER BY CreatedAt DESC');
-    return respond(context, 200, result.recordset);
-  }
-  if (method === 'POST') {
-    const b = req.body;
-    await db.request()
-      .input('Name', sql.NVarChar, b.name)
-      .input('Year', sql.Int, b.year)
-      .input('CreatedBy', sql.NVarChar, b.createdBy || '')
-      .query('INSERT INTO BudgetVersions (Name,Year,CreatedBy) VALUES (@Name,@Year,@CreatedBy)');
-    const r = await db.request().query('SELECT TOP 1 * FROM BudgetVersions ORDER BY CreatedAt DESC');
-    return respond(context, 201, r.recordset[0]);
-  }
-}
-
-if (path.startsWith('budget-versions/') && path.includes('/rows')) {
-  const versionId = path.split('/')[1];
-  if (method === 'GET') {
-    const result = await db.request().input('VersionId', sql.Int, versionId)
-      .query('SELECT * FROM BudgetRows WHERE VersionId=@VersionId ORDER BY Category, SubCategory');
-    return respond(context, 200, result.recordset);
-  }
-  if (method === 'POST') {
-    const rows = req.body;
-    await db.request().input('VersionId', sql.Int, versionId)
-      .query('DELETE FROM BudgetRows WHERE VersionId=@VersionId');
-    for (const r of rows) {
-      await db.request()
-        .input('VersionId', sql.Int, versionId)
-        .input('Category', sql.NVarChar, r.category)
-        .input('SubCategory', sql.NVarChar, r.subCategory)
-        .input('Jan', sql.Int, r.Jan||0).input('Feb', sql.Int, r.Feb||0).input('Mar', sql.Int, r.Mar||0)
-        .input('Apr', sql.Int, r.Apr||0).input('Maj', sql.Int, r.Maj||0).input('Jun', sql.Int, r.Jun||0)
-        .input('Jul', sql.Int, r.Jul||0).input('Aug', sql.Int, r.Aug||0).input('Sep', sql.Int, r.Sep||0)
-        .input('Okt', sql.Int, r.Okt||0).input('Nov', sql.Int, r.Nov||0).input('Dec', sql.Int, r.Dec||0)
-        .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
-    }
-    return respond(context, 200, { message: 'Budget sparad' });
-  }
-}
         return respond(context, 200, result.recordset);
       }
       if (method === 'POST') {
@@ -455,6 +397,49 @@ if (path.startsWith('budget-versions/') && path.includes('/rows')) {
       const result = await db.request().input('ProspectId', sql.Int, id)
         .query('SELECT * FROM Activities WHERE ProspectId=@ProspectId ORDER BY CreatedAt DESC');
       return respond(context, 200, result.recordset);
+    }
+
+    if (path === 'budget-versions') {
+      if (method === 'GET') {
+        const result = await db.request().query('SELECT * FROM BudgetVersions ORDER BY Year DESC, CreatedAt DESC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const b = req.body;
+        await db.request()
+          .input('Name', sql.NVarChar, b.name)
+          .input('Year', sql.Int, b.year)
+          .input('CreatedBy', sql.NVarChar, b.createdBy || '')
+          .query('INSERT INTO BudgetVersions (Name,Year,CreatedBy) VALUES (@Name,@Year,@CreatedBy)');
+        const r = await db.request().query('SELECT TOP 1 * FROM BudgetVersions ORDER BY CreatedAt DESC');
+        return respond(context, 201, r.recordset[0]);
+      }
+    }
+
+    if (path.startsWith('budget-versions/') && path.includes('/rows')) {
+      const versionId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request().input('VersionId', sql.Int, versionId)
+          .query('SELECT * FROM BudgetRows WHERE VersionId=@VersionId ORDER BY Category, SubCategory');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const rows = req.body;
+        await db.request().input('VersionId', sql.Int, versionId)
+          .query('DELETE FROM BudgetRows WHERE VersionId=@VersionId');
+        for (const r of rows) {
+          await db.request()
+            .input('VersionId', sql.Int, versionId)
+            .input('Category', sql.NVarChar, r.category)
+            .input('SubCategory', sql.NVarChar, r.subCategory)
+            .input('Jan', sql.Int, r.Jan||0).input('Feb', sql.Int, r.Feb||0).input('Mar', sql.Int, r.Mar||0)
+            .input('Apr', sql.Int, r.Apr||0).input('Maj', sql.Int, r.Maj||0).input('Jun', sql.Int, r.Jun||0)
+            .input('Jul', sql.Int, r.Jul||0).input('Aug', sql.Int, r.Aug||0).input('Sep', sql.Int, r.Sep||0)
+            .input('Okt', sql.Int, r.Okt||0).input('Nov', sql.Int, r.Nov||0).input('Dec', sql.Int, r.Dec||0)
+            .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
+        }
+        return respond(context, 200, { message: 'Budget sparad' });
+      }
     }
 
     return respond(context, 404, { message: 'Endpoint hittades inte' });
