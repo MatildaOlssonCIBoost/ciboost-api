@@ -3,7 +3,24 @@
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
 };
-
+async function validateToken(req) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+  const token = authHeader.split(' ')[1];
+  try {
+    const tenantId = process.env.AZURE_TENANT_ID;
+    const clientId = process.env.AZURE_CLIENT_ID;
+    const keysUrl = `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`;
+    const keysRes = await fetch(keysUrl);
+    const keys = await keysRes.json();
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    if (payload.aud !== clientId && payload.aud !== `api://${clientId}`) return false;
+    if (payload.exp < Math.floor(Date.now() / 1000)) return false;
+    return true;
+  } catch(e) { return false; }
+}
 const sql = require('mssql');
 
 const config = {
