@@ -78,9 +78,13 @@ module.exports = async function (context, req) {
           .input('LastContact', sql.Date, p.lastContact || null)
           .input('NextMeeting', sql.Date, p.nextMeeting || null)
           .input('Notes', sql.NVarChar, p.notes)
+          .input('ValueMin', sql.Int, p.valueMin || null)
+          .input('ValueMax', sql.Int, p.valueMax || null)
+          .input('LostReason', sql.NVarChar, p.lostReason || null)
           .query(`UPDATE Prospects SET Company=@Company,Industry=@Industry,Contact=@Contact,Role=@Role,
-                  Source=@Source,Owner=@Owner,Stage=@Stage,Score=@Score,Value=@Value,Probability=@Probability,
-                  LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,UpdatedAt=GETDATE() WHERE Id=@Id`);
+        Source=@Source,Owner=@Owner,Stage=@Stage,Score=@Score,Value=@Value,Probability=@Probability,
+        LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,
+        ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,UpdatedAt=GETDATE() WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
