@@ -52,9 +52,6 @@ module.exports = async function (context, req) {
     if (path === 'prospects') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM Prospects ORDER BY CreatedAt DESC');
-        if (path === 'budget-versions') {
-  if (method === 'GET') {
-    const result = await db.request().query('SELECT * FROM BudgetVersions ORDER BY Year DESC, CreatedAt DESC');
     return respond(context, 200, result.recordset);
   }
   if (method === 'POST') {
