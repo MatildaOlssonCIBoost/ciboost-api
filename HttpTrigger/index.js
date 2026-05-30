@@ -1,4 +1,7 @@
-﻿// Required schema changes for risk-snapshot / renewal-outcome / pipeline analysis:
+﻿// Required schema for budget row source tracking (import provenance):
+//   ALTER TABLE BudgetRows ADD Source NVARCHAR(50) NULL, ImportedAt DATE NULL;
+//
+// Required schema changes for risk-snapshot / renewal-outcome / pipeline analysis:
 //   ALTER TABLE Prospects ADD ClosedAt DATE NULL;
 //   CREATE TABLE RiskSnapshots (
 //     Id INT IDENTITY(1,1) PRIMARY KEY,
@@ -530,11 +533,13 @@ module.exports = async function (context, req) {
             .input('VersionId', sql.Int, versionId)
             .input('Category', sql.NVarChar, r.category)
             .input('SubCategory', sql.NVarChar, r.subCategory)
+            .input('Source', sql.NVarChar, r.source || null)
+            .input('ImportedAt', sql.Date, r.importedAt || null)
             .input('Jan', sql.Int, r.Jan||0).input('Feb', sql.Int, r.Feb||0).input('Mar', sql.Int, r.Mar||0)
             .input('Apr', sql.Int, r.Apr||0).input('Maj', sql.Int, r.Maj||0).input('Jun', sql.Int, r.Jun||0)
             .input('Jul', sql.Int, r.Jul||0).input('Aug', sql.Int, r.Aug||0).input('Sep', sql.Int, r.Sep||0)
             .input('Okt', sql.Int, r.Okt||0).input('Nov', sql.Int, r.Nov||0).input('Dec', sql.Int, r.Dec||0)
-            .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
+            .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Source,ImportedAt,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Source,@ImportedAt,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
         }
         return respond(context, 200, { message: 'Budget sparad' });
       }
