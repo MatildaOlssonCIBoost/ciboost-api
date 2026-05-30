@@ -416,6 +416,24 @@ module.exports = async function (context, req) {
       }
     }
 
+    if (path.startsWith('budget-versions/') && !path.includes('/rows')) {
+      const versionId = path.split('/')[1];
+      if (method === 'PUT') {
+        const b = req.body;
+        await db.request()
+          .input('Id', sql.Int, versionId)
+          .input('Name', sql.NVarChar, b.name)
+          .input('Year', sql.Int, b.year)
+          .query('UPDATE BudgetVersions SET Name=@Name, Year=@Year WHERE Id=@Id');
+        return respond(context, 200, { message: 'Uppdaterad' });
+      }
+      if (method === 'DELETE') {
+        await db.request().input('Id', sql.Int, versionId)
+          .query('DELETE FROM BudgetRows WHERE VersionId=@Id; DELETE FROM BudgetVersions WHERE Id=@Id');
+        return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
     if (path.startsWith('budget-versions/') && path.includes('/rows')) {
       const versionId = path.split('/')[1];
       if (method === 'GET') {
