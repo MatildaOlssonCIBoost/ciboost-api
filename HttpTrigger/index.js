@@ -1,4 +1,27 @@
-﻿const corsHeaders = {
+﻿// Required schema changes for risk-snapshot / renewal-outcome / pipeline analysis:
+//   ALTER TABLE Prospects ADD ClosedAt DATE NULL;
+//   CREATE TABLE RiskSnapshots (
+//     Id INT IDENTITY(1,1) PRIMARY KEY,
+//     CustomerId INT NOT NULL,
+//     CreatedAt DATETIME DEFAULT GETDATE(),
+//     TriggerType NVARCHAR(50) NOT NULL,  -- manual, auto_90d, auto_30d, auto_15d
+//     Score INT, RiskLevel NVARCHAR(20), RenewalProb INT,
+//     StepBase INT, Satisfaction INT, ActivityLevel NVARCHAR(30),
+//     Economy NVARCHAR(30), Focus NVARCHAR(30), DaysToLicenseEnd INT
+//   );
+//   CREATE TABLE RenewalOutcomes (
+//     Id INT IDENTITY(1,1) PRIMARY KEY,
+//     CustomerId INT NOT NULL,
+//     RiskSnapshotId INT NULL,
+//     Outcome NVARCHAR(30) NOT NULL,  -- Förnyade, Churnade, Pausad, Ej registrerat
+//     DecisionDate DATE NULL,
+//     Notes NVARCHAR(MAX) NULL,
+//     CreatedAt DATETIME DEFAULT GETDATE()
+//   );
+// Until those tables/columns exist, riskSnapshot/renewalOutcome/modelAnalysis
+// and the ClosedAt stamping in prospects PUT will fail with "Invalid column name".
+
+const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
@@ -16,6 +39,52 @@ let pool;
 async function getPool() {
   if (!pool) pool = await sql.connect(config);
   return pool;
+}
+
+function calculateRiskScore({ steps = [], satisfaction = 0, activityLevel = '', economy = 'unknown', focus = 'unknown' } = {}) {
+  const stepPoints = [5, 10, 35, 65, 95, 100];
+  let stepBase = 0;
+  for (let i = 0; i < 6; i++) if (steps[i]) stepBase = stepPoints[i];
+  let score = stepBase;
+  const satAdj = { 1: -100, 2: -75, 3: -25, 4: 0, 5: 25 };
+  score += satAdj[satisfaction] || 0;
+  const actAdj = { '': -50, 'ingen': -50, 'Låg': -25, 'låg': -25, 'Medium': 25, 'medium': 25, 'Hög': 50, 'hög': 50 };
+  score += actAdj[activityLevel] != null ? actAdj[activityLevel] : 0;
+  const ecoAdj = { large_savings: -50, savings: -25, unknown: 0, good: 25 };
+  score += ecoAdj[economy] != null ? ecoAdj[economy] : 0;
+  const focAdj = { strong_other: -50, other: -25, unknown: 0, priority: 25 };
+  score += focAdj[focus] != null ? focAdj[focus] : 0;
+  const riskLevel = score < 50 ? 'Hög' : score <= 120 ? 'Medium' : 'Låg';
+  const anchors = [[-150, 5], [0, 45], [50, 55], [120, 80], [200, 95]];
+  let prob;
+  if (score <= anchors[0][0]) prob = anchors[0][1];
+  else if (score >= anchors[anchors.length - 1][0]) prob = anchors[anchors.length - 1][1];
+  else {
+    for (let i = 0; i < anchors.length - 1; i++) {
+      const [x1, y1] = anchors[i], [x2, y2] = anchors[i + 1];
+      if (score >= x1 && score <= x2) { prob = y1 + (y2 - y1) * ((score - x1) / (x2 - x1)); break; }
+    }
+  }
+  const renewalProb = Math.round(Math.max(5, Math.min(95, prob)));
+  return { score, stepBase, riskLevel, renewalProb };
+}
+
+async function insertRiskSnapshot(db, row) {
+  return db.request()
+    .input('CustomerId', sql.Int, row.customerId)
+    .input('TriggerType', sql.NVarChar, row.triggerType || 'manual')
+    .input('Score', sql.Int, row.score)
+    .input('RiskLevel', sql.NVarChar, row.riskLevel)
+    .input('RenewalProb', sql.Int, row.renewalProb)
+    .input('StepBase', sql.Int, row.stepBase || 0)
+    .input('Satisfaction', sql.Int, row.satisfaction || 0)
+    .input('ActivityLevel', sql.NVarChar, row.activityLevel || '')
+    .input('Economy', sql.NVarChar, row.economy || 'unknown')
+    .input('Focus', sql.NVarChar, row.focus || 'unknown')
+    .input('DaysToLicenseEnd', sql.Int, row.daysToLicenseEnd != null ? row.daysToLicenseEnd : null)
+    .query(`INSERT INTO RiskSnapshots (CustomerId,TriggerType,Score,RiskLevel,RenewalProb,StepBase,Satisfaction,ActivityLevel,Economy,Focus,DaysToLicenseEnd)
+            OUTPUT INSERTED.Id, INSERTED.CreatedAt
+            VALUES (@CustomerId,@TriggerType,@Score,@RiskLevel,@RenewalProb,@StepBase,@Satisfaction,@ActivityLevel,@Economy,@Focus,@DaysToLicenseEnd)`);
 }
 
 module.exports = async function (context, req) {
@@ -82,7 +151,9 @@ module.exports = async function (context, req) {
           .query(`UPDATE Prospects SET Company=@Company,Industry=@Industry,Contact=@Contact,Role=@Role,
         Source=@Source,Owner=@Owner,Stage=@Stage,Score=@Score,Value=@Value,Probability=@Probability,
         LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,
-        ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,UpdatedAt=GETDATE() WHERE Id=@Id`);
+        ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,
+        ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END,
+        UpdatedAt=GETDATE() WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
@@ -368,6 +439,15 @@ module.exports = async function (context, req) {
       }
     }
 
+    // Koncern-sökning
+    if (path === 'customers/by-parent' && method === 'GET') {
+      const parent = req.query.name;
+      const result = await db.request()
+        .input('ParentCompany', sql.NVarChar, parent)
+        .query('SELECT * FROM Customers WHERE ParentCompany=@ParentCompany ORDER BY LicenseEnd ASC');
+      return respond(context, 200, result.recordset);
+    }
+
     if (path === 'commission-recipients') {
       if (method === 'GET') {
         const result = await db.request().query('SELECT * FROM CommissionRecipients ORDER BY Name ASC');
@@ -458,6 +538,174 @@ module.exports = async function (context, req) {
         }
         return respond(context, 200, { message: 'Budget sparad' });
       }
+    }
+
+    if (path === 'riskSnapshot' && method === 'POST') {
+      const b = req.body || {};
+      if (!b.customerId) return respond(context, 400, { message: 'customerId krävs' });
+      const r = calculateRiskScore(b);
+      const ins = await insertRiskSnapshot(db, {
+        customerId: b.customerId,
+        triggerType: b.triggerType || 'manual',
+        score: r.score, riskLevel: r.riskLevel, renewalProb: r.renewalProb, stepBase: r.stepBase,
+        satisfaction: b.satisfaction || 0, activityLevel: b.activityLevel || '',
+        economy: b.economy || 'unknown', focus: b.focus || 'unknown',
+        daysToLicenseEnd: b.daysToLicenseEnd != null ? b.daysToLicenseEnd : null
+      });
+      const row = ins.recordset[0];
+      return respond(context, 201, { id: row.Id, createdAt: row.CreatedAt, ...r });
+    }
+
+    if (path === 'renewalOutcome' && method === 'POST') {
+      const b = req.body || {};
+      if (!b.customerId || !b.outcome) return respond(context, 400, { message: 'customerId och outcome krävs' });
+      const latest = await db.request()
+        .input('CustomerId', sql.Int, b.customerId)
+        .query('SELECT TOP 1 Id FROM RiskSnapshots WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
+      const snapId = latest.recordset[0] ? latest.recordset[0].Id : null;
+      await db.request()
+        .input('CustomerId', sql.Int, b.customerId)
+        .input('RiskSnapshotId', sql.Int, snapId)
+        .input('Outcome', sql.NVarChar, b.outcome)
+        .input('DecisionDate', sql.Date, b.decisionDate || null)
+        .input('Notes', sql.NVarChar, b.notes || null)
+        .query(`INSERT INTO RenewalOutcomes (CustomerId,RiskSnapshotId,Outcome,DecisionDate,Notes)
+                VALUES (@CustomerId,@RiskSnapshotId,@Outcome,@DecisionDate,@Notes)`);
+      return respond(context, 201, { message: 'Sparad', riskSnapshotId: snapId });
+    }
+
+    if (path === 'modelAnalysis' && method === 'GET') {
+      const mode = (req.query && req.query.mode) || 'renewal';
+      if (mode === 'pipeline') {
+        const closed = (await db.request().query("SELECT * FROM Prospects WHERE Stage IN ('Closed Won','Closed Lost')")).recordset;
+        const total = closed.length;
+        const buckets = [[0, 20], [20, 40], [40, 60], [60, 80], [80, 100]];
+        const calibration = buckets.map(([lo, hi]) => {
+          const inB = closed.filter(p => (p.Probability || 0) >= lo && (p.Probability || 0) < (hi === 100 ? 101 : hi));
+          const won = inB.filter(p => p.Stage === 'Closed Won').length;
+          return { bucket: `${lo}-${hi}%`, predicted: (lo + hi) / 2, actual: inB.length ? Math.round(won / inB.length * 100) : null, n: inB.length };
+        });
+        const misclassified = closed.filter(p => {
+          const prob = p.Probability || 0;
+          return (prob > 60 && p.Stage === 'Closed Lost') || (prob < 40 && p.Stage === 'Closed Won');
+        }).map(p => ({
+          customerId: p.Id,
+          company: p.Company,
+          predictedLevel: (p.Probability || 0) >= 50 ? 'Hög' : 'Låg',
+          predictedProb: p.Probability || 0,
+          actualOutcome: p.Stage === 'Closed Won' ? 'Vunnen' : 'Förlorad',
+          snapshotDate: p.CreatedAt,
+          decisionDate: p.ClosedAt || p.UpdatedAt
+        }));
+        const catFactors = [
+          { key: 'Industry', label: 'Bransch' },
+          { key: 'Source', label: 'Källa' },
+          { key: 'Owner', label: 'Kundansvarig' }
+        ];
+        const factorContribution = catFactors.map(f => {
+          const groups = {};
+          closed.forEach(p => {
+            const v = p[f.key] || '–';
+            if (!groups[v]) groups[v] = { won: 0, total: 0 };
+            groups[v].total++;
+            if (p.Stage === 'Closed Won') groups[v].won++;
+          });
+          const entries = Object.entries(groups).map(([v, s]) => ({ value: v, winRate: s.total ? Math.round(s.won / s.total * 100) : 0, n: s.total })).sort((a, b) => b.winRate - a.winRate);
+          const rates = entries.map(e => e.winRate);
+          const spread = rates.length ? Math.max(...rates) - Math.min(...rates) : 0;
+          return { factor: f.label, key: f.key, entries, spread, predictiveLift: spread };
+        });
+        const empBuckets = [{ lo: 0, hi: 10, label: '1-10' }, { lo: 11, hi: 50, label: '11-50' }, { lo: 51, hi: 200, label: '51-200' }, { lo: 201, hi: 1000, label: '201-1000' }, { lo: 1001, hi: 1e9, label: '1000+' }];
+        const empEntries = empBuckets.map(b => {
+          const inB = closed.filter(p => (p.Employees || 0) >= b.lo && (p.Employees || 0) <= b.hi);
+          const won = inB.filter(p => p.Stage === 'Closed Won').length;
+          return { value: b.label, winRate: inB.length ? Math.round(won / inB.length * 100) : 0, n: inB.length };
+        }).filter(e => e.n > 0);
+        const empRates = empEntries.map(e => e.winRate);
+        const empSpread = empRates.length ? Math.max(...empRates) - Math.min(...empRates) : 0;
+        factorContribution.push({ factor: 'Storlek (anställda)', key: 'Employees', entries: empEntries, spread: empSpread, predictiveLift: empSpread });
+        factorContribution.sort((a, b) => b.spread - a.spread);
+        let suggestedWeights = null;
+        if (total >= 20) {
+          const maxSpread = Math.max(...factorContribution.map(f => f.spread), 1);
+          suggestedWeights = {};
+          factorContribution.forEach(f => {
+            suggestedWeights[f.key] = Math.round(Math.max(0.5, Math.min(2, f.spread / maxSpread * 1.5)) * 100) / 100;
+          });
+        }
+        return respond(context, 200, {
+          mode: 'pipeline',
+          totalSnapshots: total, totalOutcomes: total, pairedCount: total,
+          calibration, misclassified, confusionMatrix: {}, factorContribution,
+          weightsLocked: total < 20, suggestedWeights, outcomesNeeded: Math.max(0, 20 - total)
+        });
+      }
+      const snaps = (await db.request().query('SELECT * FROM RiskSnapshots ORDER BY CreatedAt DESC')).recordset;
+      const outs = (await db.request().query('SELECT * FROM RenewalOutcomes ORDER BY CreatedAt DESC')).recordset;
+      const snapById = {}; snaps.forEach(s => { snapById[s.Id] = s; });
+      const paired = outs.map(o => {
+        let snap = o.RiskSnapshotId ? snapById[o.RiskSnapshotId] : null;
+        if (!snap) {
+          const cand = snaps.filter(s => s.CustomerId === o.CustomerId && new Date(s.CreatedAt) <= new Date(o.CreatedAt));
+          snap = cand[0] || null;
+        }
+        return { outcome: o, snapshot: snap };
+      }).filter(p => p.snapshot);
+      const buckets = [[0, 20], [20, 40], [40, 60], [60, 80], [80, 100]];
+      const calibration = buckets.map(([lo, hi]) => {
+        const inB = paired.filter(p => p.snapshot.RenewalProb >= lo && p.snapshot.RenewalProb < (hi === 100 ? 101 : hi));
+        const renewed = inB.filter(p => p.outcome.Outcome === 'Förnyade').length;
+        const total = inB.length;
+        return { bucket: `${lo}-${hi}%`, predicted: (lo + hi) / 2, actual: total ? Math.round(renewed / total * 100) : null, n: total };
+      });
+      const misclassified = paired.filter(p => {
+        const pred = p.snapshot.RiskLevel;
+        const out = p.outcome.Outcome;
+        return (pred === 'Hög' && out === 'Förnyade') || (pred === 'Låg' && out === 'Churnade');
+      }).map(p => ({
+        customerId: p.outcome.CustomerId,
+        snapshotDate: p.snapshot.CreatedAt,
+        predictedLevel: p.snapshot.RiskLevel,
+        predictedProb: p.snapshot.RenewalProb,
+        actualOutcome: p.outcome.Outcome,
+        decisionDate: p.outcome.DecisionDate
+      }));
+      const levels = ['Hög', 'Medium', 'Låg'];
+      const outcomes = ['Förnyade', 'Churnade', 'Pausad', 'Ej registrerat'];
+      const matrix = {};
+      levels.forEach(l => { matrix[l] = {}; outcomes.forEach(o => matrix[l][o] = 0); });
+      paired.forEach(p => { if (matrix[p.snapshot.RiskLevel]) matrix[p.snapshot.RiskLevel][p.outcome.Outcome] = (matrix[p.snapshot.RiskLevel][p.outcome.Outcome] || 0) + 1; });
+      const factorKeys = ['StepBase', 'Satisfaction', 'ActivityLevel', 'Economy', 'Focus'];
+      const factorScore = (snap, key) => {
+        if (key === 'StepBase') return snap.StepBase || 0;
+        if (key === 'Satisfaction') return ({ 1: -100, 2: -75, 3: -25, 4: 0, 5: 25 })[snap.Satisfaction] || 0;
+        if (key === 'ActivityLevel') { const m = { '': -50, 'ingen': -50, 'Låg': -25, 'låg': -25, 'Medium': 25, 'medium': 25, 'Hög': 50, 'hög': 50 }; return m[snap.ActivityLevel] != null ? m[snap.ActivityLevel] : 0; }
+        if (key === 'Economy') { const m = { large_savings: -50, savings: -25, unknown: 0, good: 25 }; return m[snap.Economy] != null ? m[snap.Economy] : 0; }
+        if (key === 'Focus') { const m = { strong_other: -50, other: -25, unknown: 0, priority: 25 }; return m[snap.Focus] != null ? m[snap.Focus] : 0; }
+        return 0;
+      };
+      const factorContribution = factorKeys.map(k => {
+        const renewed = paired.filter(p => p.outcome.Outcome === 'Förnyade').map(p => factorScore(p.snapshot, k));
+        const churned = paired.filter(p => p.outcome.Outcome === 'Churnade').map(p => factorScore(p.snapshot, k));
+        const avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+        const lift = avg(renewed) - avg(churned);
+        return { factor: k, avgRenewed: Math.round(avg(renewed) * 10) / 10, avgChurned: Math.round(avg(churned) * 10) / 10, predictiveLift: Math.round(lift * 10) / 10 };
+      }).sort((a, b) => Math.abs(b.predictiveLift) - Math.abs(a.predictiveLift));
+      const totalOutcomes = outs.length;
+      let suggestedWeights = null;
+      if (totalOutcomes >= 20) {
+        const maxLift = Math.max(...factorContribution.map(f => Math.abs(f.predictiveLift)), 1);
+        suggestedWeights = {};
+        factorContribution.forEach(f => {
+          const scale = Math.max(0.5, Math.min(2, Math.abs(f.predictiveLift) / maxLift * 1.5));
+          suggestedWeights[f.factor] = Math.round(scale * 100) / 100;
+        });
+      }
+      return respond(context, 200, {
+        totalSnapshots: snaps.length, totalOutcomes, pairedCount: paired.length,
+        calibration, misclassified, confusionMatrix: matrix, factorContribution,
+        weightsLocked: totalOutcomes < 20, suggestedWeights, outcomesNeeded: Math.max(0, 20 - totalOutcomes)
+      });
     }
 
     return respond(context, 404, { message: 'Endpoint hittades inte' });
