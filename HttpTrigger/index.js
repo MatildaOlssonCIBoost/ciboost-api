@@ -11,6 +11,11 @@
 //   ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
 //   ALTER TABLE Customers ADD Employees INT NULL;
 //   ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
+//
+// Prospect Team/avdelning + Koncern (enhetlig kortstruktur):
+//   ALTER TABLE Prospects ADD SubName NVARCHAR(200) NULL;
+//   ALTER TABLE Prospects ADD ParentCompany NVARCHAR(200) NULL;
+// Skrivs feltåligt i prospects POST/PUT så saknade kolumner inte bryter sparning.
 // Dessa skrivs via en feltålig separat UPDATE i customers PUT, så saknade
 // kolumner bryter inte resten av kundsparningen.
 //
@@ -137,7 +142,20 @@ module.exports = async function (context, req) {
           .input('NextMeeting', sql.Date, p.nextMeeting || null)
           .input('Notes', sql.NVarChar, p.notes)
           .query(`INSERT INTO Prospects (Company,Industry,Contact,Role,Source,Owner,Stage,Score,Value,Probability,LastContact,NextMeeting,Notes)
-                  VALUES (@Company,@Industry,@Contact,@Role,@Source,@Owner,@Stage,@Score,@Value,@Probability,@LastContact,@NextMeeting,@Notes)`);
+                  OUTPUT INSERTED.Id
+                  VALUES (@Company,@Industry,@Contact,@Role,@Source,@Owner,@Stage,@Score,@Value,@Probability,@LastContact,@NextMeeting,@Notes)`)
+          .then(async r => {
+            const newId = r.recordset && r.recordset[0] ? r.recordset[0].Id : null;
+            if (newId) {
+              try {
+                await db.request()
+                  .input('Id', sql.Int, newId)
+                  .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
+                  .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
+                  .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany WHERE Id=@Id');
+              } catch (e) { /* kolumnerna finns ännu inte */ }
+            }
+          });
         return respond(context, 201, { message: 'Skapad' });
       }
     }
@@ -170,6 +188,14 @@ module.exports = async function (context, req) {
         ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,
         ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END,
         UpdatedAt=GETDATE() WHERE Id=@Id`);
+        // Team/avdelning + Koncern i en feltålig separat UPDATE (kolumner kan saknas).
+        try {
+          await db.request()
+            .input('Id', sql.Int, id)
+            .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
+            .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
+            .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany WHERE Id=@Id');
+        } catch (e) { /* kolumnerna finns ännu inte — se schemakommentar */ }
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
@@ -496,6 +522,13 @@ module.exports = async function (context, req) {
         .input('CreatedBy', sql.NVarChar, a.createdBy)
         .query('INSERT INTO Activities (ProspectId,Type,Note,CreatedBy) VALUES (@ProspectId,@Type,@Note,@CreatedBy)');
       return respond(context, 201, { message: 'Aktivitet sparad' });
+    }
+
+    // DELETE /activities/:id — ta bort en enskild aktivitet (prospekt-tidslinje).
+    if (path.startsWith('activities/') && method === 'DELETE' && /^\d+$/.test(path.split('/')[1] || '')) {
+      const aid = path.split('/')[1];
+      await db.request().input('Id', sql.Int, aid).query('DELETE FROM Activities WHERE Id=@Id');
+      return respond(context, 200, { message: 'Borttagen' });
     }
 
     if (path.startsWith('activities/prospect/')) {
