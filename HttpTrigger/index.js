@@ -4,6 +4,9 @@
 // Required schema for budget version type (Likviditet vs Resultat):
 //   ALTER TABLE BudgetVersions ADD BudgetType NVARCHAR(20) NULL;
 //
+// Required schema for per-revenue-item renewal outcome amount:
+//   ALTER TABLE RenewalOutcomes ADD Amount INT NULL;
+//
 // Required schema changes for risk-snapshot / renewal-outcome / pipeline analysis:
 //   ALTER TABLE Prospects ADD ClosedAt DATE NULL;
 //   CREATE TABLE RiskSnapshots (
@@ -579,8 +582,9 @@ module.exports = async function (context, req) {
         .input('Outcome', sql.NVarChar, b.outcome)
         .input('DecisionDate', sql.Date, b.decisionDate || null)
         .input('Notes', sql.NVarChar, b.notes || null)
-        .query(`INSERT INTO RenewalOutcomes (CustomerId,RiskSnapshotId,Outcome,DecisionDate,Notes)
-                VALUES (@CustomerId,@RiskSnapshotId,@Outcome,@DecisionDate,@Notes)`);
+        .input('Amount', sql.Int, b.amount != null ? b.amount : null)
+        .query(`INSERT INTO RenewalOutcomes (CustomerId,RiskSnapshotId,Outcome,DecisionDate,Notes,Amount)
+                VALUES (@CustomerId,@RiskSnapshotId,@Outcome,@DecisionDate,@Notes,@Amount)`);
       return respond(context, 201, { message: 'Sparad', riskSnapshotId: snapId });
     }
 
