@@ -7,6 +7,13 @@
 // Required schema for per-revenue-item renewal outcome amount:
 //   ALTER TABLE RenewalOutcomes ADD Amount INT NULL;
 //
+// Customer fields Koncern/Antal anställda/Bransch (om de saknas — annars no-op):
+//   ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
+//   ALTER TABLE Customers ADD Employees INT NULL;
+//   ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
+// Dessa skrivs via en feltålig separat UPDATE i customers PUT, så saknade
+// kolumner bryter inte resten av kundsparningen.
+//
 // Required schema changes for risk-snapshot / renewal-outcome / pipeline analysis:
 //   ALTER TABLE Prospects ADD ClosedAt DATE NULL;
 //   CREATE TABLE RiskSnapshots (
@@ -405,6 +412,16 @@ module.exports = async function (context, req) {
             CommissionSalesperson=@CommissionSalesperson, CommissionPercent=@CommissionPercent,
             CommissionAmount=@CommissionAmount, Notes=@Notes, Owner=@Owner
             WHERE Id=@Id`);
+        // Koncern/Antal anställda/Bransch i en egen, feltålig UPDATE så att en
+        // ev. saknad kolumn inte fäller hela kundsparningen.
+        try {
+          await db.request()
+            .input('Id', sql.Int, id)
+            .input('ParentCompany', sql.NVarChar, c.parentCompany != null ? c.parentCompany : null)
+            .input('Employees', sql.Int, c.employees != null ? c.employees : null)
+            .input('Industry', sql.NVarChar, c.industry != null ? c.industry : null)
+            .query('UPDATE Customers SET ParentCompany=@ParentCompany, Employees=@Employees, Industry=@Industry WHERE Id=@Id');
+        } catch (e) { /* kolumnerna finns ännu inte — se ALTER nedan i schemakommentaren */ }
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
