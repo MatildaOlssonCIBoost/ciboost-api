@@ -1,6 +1,9 @@
 ﻿// Required schema for budget row source tracking (import provenance):
 //   ALTER TABLE BudgetRows ADD Source NVARCHAR(50) NULL, ImportedAt DATE NULL;
 //
+// Required schema for budget version type (Likviditet vs Resultat):
+//   ALTER TABLE BudgetVersions ADD BudgetType NVARCHAR(20) NULL;
+//
 // Required schema changes for risk-snapshot / renewal-outcome / pipeline analysis:
 //   ALTER TABLE Prospects ADD ClosedAt DATE NULL;
 //   CREATE TABLE RiskSnapshots (
@@ -493,7 +496,8 @@ module.exports = async function (context, req) {
           .input('Name', sql.NVarChar, b.name)
           .input('Year', sql.Int, b.year)
           .input('CreatedBy', sql.NVarChar, b.createdBy || '')
-          .query('INSERT INTO BudgetVersions (Name,Year,CreatedBy) VALUES (@Name,@Year,@CreatedBy)');
+          .input('BudgetType', sql.NVarChar, b.budgetType || null)
+          .query('INSERT INTO BudgetVersions (Name,Year,CreatedBy,BudgetType) VALUES (@Name,@Year,@CreatedBy,@BudgetType)');
         const r = await db.request().query('SELECT TOP 1 * FROM BudgetVersions ORDER BY CreatedAt DESC');
         return respond(context, 201, r.recordset[0]);
       }
@@ -507,7 +511,8 @@ module.exports = async function (context, req) {
           .input('Id', sql.Int, versionId)
           .input('Name', sql.NVarChar, b.name)
           .input('Year', sql.Int, b.year)
-          .query('UPDATE BudgetVersions SET Name=@Name, Year=@Year WHERE Id=@Id');
+          .input('BudgetType', sql.NVarChar, b.budgetType || null)
+          .query('UPDATE BudgetVersions SET Name=@Name, Year=@Year, BudgetType=@BudgetType WHERE Id=@Id');
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
