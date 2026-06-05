@@ -75,6 +75,25 @@ async function getPool() {
   return pool;
 }
 
+// Skapa kolumner self-healing (idempotent) så att Koncern/Team/Antal anställda/
+// Bransch kan sparas utan manuell SQL. Körs en gång per kall start.
+let _colsEnsured = false;
+async function ensureSchemaColumns(db) {
+  if (_colsEnsured) return;
+  try {
+    await db.request().query(`
+      IF COL_LENGTH('Prospects','SubName') IS NULL ALTER TABLE Prospects ADD SubName NVARCHAR(200) NULL;
+      IF COL_LENGTH('Prospects','ParentCompany') IS NULL ALTER TABLE Prospects ADD ParentCompany NVARCHAR(200) NULL;
+      IF COL_LENGTH('Prospects','Employees') IS NULL ALTER TABLE Prospects ADD Employees INT NULL;
+      IF COL_LENGTH('Prospects','Industry') IS NULL ALTER TABLE Prospects ADD Industry NVARCHAR(100) NULL;
+      IF COL_LENGTH('Customers','ParentCompany') IS NULL ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
+      IF COL_LENGTH('Customers','Employees') IS NULL ALTER TABLE Customers ADD Employees INT NULL;
+      IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
+    `);
+    _colsEnsured = true;
+  } catch (e) { /* saknar ALTER-rättighet — fält sparas först när kolumnerna finns */ }
+}
+
 function calculateRiskScore({ steps = [], satisfaction = 0, activityLevel = '', economy = 'unknown', focus = 'unknown' } = {}) {
   const stepPoints = [5, 10, 35, 65, 95, 100];
   let stepBase = 0;
@@ -132,6 +151,7 @@ module.exports = async function (context, req) {
 
   try {
     const db = await getPool();
+    await ensureSchemaColumns(db);
 
     if (path === 'prospects') {
       if (method === 'GET') {
@@ -572,8 +592,11 @@ module.exports = async function (context, req) {
           .input('Revenue_Consulting_Date', sql.Date, c.revenueConsultingDate || null)
           .input('Risk', sql.NVarChar, c.risk)
           .input('Notes', sql.NVarChar, c.notes)
-          .query(`INSERT INTO Customers (Company,Contact,Owner,SubName,LicenseType,LicenseStart,LicenseEnd,ARR,ARR_Fixed,Revenue_Training,Revenue_Training_Date,Revenue_Consulting,Revenue_Consulting_Date,Risk,Notes)
-                  VALUES (@Company,@Contact,@Owner,@SubName,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@ARR_Fixed,@Revenue_Training,@Revenue_Training_Date,@Revenue_Consulting,@Revenue_Consulting_Date,@Risk,@Notes)`);
+          .input('ParentCompany', sql.NVarChar, c.parentCompany != null ? c.parentCompany : null)
+          .input('Employees', sql.Int, c.employees != null ? c.employees : null)
+          .input('Industry', sql.NVarChar, c.industry != null ? c.industry : null)
+          .query(`INSERT INTO Customers (Company,Contact,Owner,SubName,LicenseType,LicenseStart,LicenseEnd,ARR,ARR_Fixed,Revenue_Training,Revenue_Training_Date,Revenue_Consulting,Revenue_Consulting_Date,Risk,Notes,ParentCompany,Employees,Industry)
+                  VALUES (@Company,@Contact,@Owner,@SubName,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@ARR_Fixed,@Revenue_Training,@Revenue_Training_Date,@Revenue_Consulting,@Revenue_Consulting_Date,@Risk,@Notes,@ParentCompany,@Employees,@Industry)`);
         return respond(context, 201, { message: 'Kund skapad' });
       }
     }
