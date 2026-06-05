@@ -100,6 +100,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('Customers','ParentCompany') IS NULL ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
       IF COL_LENGTH('Customers','Employees') IS NULL ALTER TABLE Customers ADD Employees INT NULL;
       IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
+      IF OBJECT_ID('RenewalOutcomes') IS NOT NULL AND COL_LENGTH('RenewalOutcomes','ChurnReason') IS NULL ALTER TABLE RenewalOutcomes ADD ChurnReason NVARCHAR(100) NULL;
     `);
     _colsEnsured = true;
   } catch (e) { /* saknar ALTER-rättighet — fält sparas först när kolumnerna finns */ }
@@ -792,7 +793,7 @@ module.exports = async function (context, req) {
         .input('CustomerId', sql.Int, b.customerId)
         .query('SELECT TOP 1 Id FROM RiskSnapshots WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
       const snapId = latest.recordset[0] ? latest.recordset[0].Id : null;
-      await db.request()
+      const ins = await db.request()
         .input('CustomerId', sql.Int, b.customerId)
         .input('RiskSnapshotId', sql.Int, snapId)
         .input('Outcome', sql.NVarChar, b.outcome)
@@ -800,7 +801,19 @@ module.exports = async function (context, req) {
         .input('Notes', sql.NVarChar, b.notes || null)
         .input('Amount', sql.Int, b.amount != null ? b.amount : null)
         .query(`INSERT INTO RenewalOutcomes (CustomerId,RiskSnapshotId,Outcome,DecisionDate,Notes,Amount)
+                OUTPUT INSERTED.Id
                 VALUES (@CustomerId,@RiskSnapshotId,@Outcome,@DecisionDate,@Notes,@Amount)`);
+      // Churnanledning i en egen feltålig UPDATE (kolumnen self-healas i
+      // ensureSchemaColumns; bryter aldrig själva utfallssparningen om den saknas).
+      const outId = ins.recordset && ins.recordset[0] ? ins.recordset[0].Id : null;
+      if (outId && b.churnReason) {
+        try {
+          await db.request()
+            .input('Id', sql.Int, outId)
+            .input('ChurnReason', sql.NVarChar, b.churnReason)
+            .query('UPDATE RenewalOutcomes SET ChurnReason=@ChurnReason WHERE Id=@Id');
+        } catch (e) { /* kolumnen finns ännu inte */ }
+      }
       return respond(context, 201, { message: 'Sparad', riskSnapshotId: snapId });
     }
 
