@@ -17,8 +17,16 @@
 //   ALTER TABLE Prospects ADD ParentCompany NVARCHAR(200) NULL;
 // Skrivs feltåligt i prospects POST/PUT så saknade kolumner inte bryter sparning.
 //
-// Viktning per prospekt-intäktspost (lagras i objektet; persisteras via det
-// klientlager som används för prospect-intäkter):
+// Prospect-intäktsposter (server-side). Om tabellen saknas, skapa den:
+//   CREATE TABLE ProspectRevenues (
+//     Id INT IDENTITY(1,1) PRIMARY KEY,
+//     ProspectId INT NOT NULL,
+//     Type NVARCHAR(50), Amount INT, Probability INT NULL,
+//     DateFrom DATE NULL, DateTo DATE NULL, Description NVARCHAR(MAX) NULL,
+//     InvoiceDate DATE NULL, Paid INT NULL, PaymentDate DATE NULL,
+//     CreatedAt DATETIME DEFAULT GETDATE()
+//   );
+// Finns tabellen redan men saknar viktningskolumnen:
 //   ALTER TABLE ProspectRevenues ADD Probability INT NULL;
 // Dessa skrivs via en feltålig separat UPDATE i customers PUT, så saknade
 // kolumner bryter inte resten av kundsparningen.
@@ -164,7 +172,61 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('prospects/')) {
+    // Prospect-intäktsposter (server-side i ProspectRevenues). Måste ligga FÖRE
+    // det generiska prospects/-blocket så att /revenues-vägar inte tolkas som
+    // uppdatering/borttagning av själva prospektet.
+    if (path.startsWith('prospects/') && path.includes('/revenues')) {
+      const prospectId = path.split('/')[1];
+      const revenueId = path.split('/')[3];
+      if (method === 'GET') {
+        const result = await db.request().input('ProspectId', sql.Int, prospectId)
+          .query('SELECT * FROM ProspectRevenues WHERE ProspectId=@ProspectId ORDER BY DateFrom ASC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const b = req.body || {};
+        const ins = await db.request()
+          .input('ProspectId', sql.Int, prospectId)
+          .input('Type', sql.NVarChar, b.Type)
+          .input('Amount', sql.Int, b.Amount || 0)
+          .input('Probability', sql.Int, b.Probability != null ? b.Probability : null)
+          .input('DateFrom', sql.Date, b.DateFrom || null)
+          .input('DateTo', sql.Date, b.DateTo || null)
+          .input('Description', sql.NVarChar, b.Description || null)
+          .input('InvoiceDate', sql.Date, b.InvoiceDate || null)
+          .input('Paid', sql.Int, b.Paid ? 1 : 0)
+          .input('PaymentDate', sql.Date, b.PaymentDate || null)
+          .query(`INSERT INTO ProspectRevenues (ProspectId,Type,Amount,Probability,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate)
+                  OUTPUT INSERTED.Id
+                  VALUES (@ProspectId,@Type,@Amount,@Probability,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate)`);
+        return respond(context, 201, { message: 'Intäkt sparad', Id: ins.recordset[0] ? ins.recordset[0].Id : null });
+      }
+      if (method === 'PUT' && revenueId) {
+        const b = req.body || {};
+        await db.request()
+          .input('Id', sql.Int, revenueId)
+          .input('Type', sql.NVarChar, b.Type)
+          .input('Amount', sql.Int, b.Amount || 0)
+          .input('Probability', sql.Int, b.Probability != null ? b.Probability : null)
+          .input('DateFrom', sql.Date, b.DateFrom || null)
+          .input('DateTo', sql.Date, b.DateTo || null)
+          .input('Description', sql.NVarChar, b.Description || null)
+          .input('InvoiceDate', sql.Date, b.InvoiceDate || null)
+          .input('Paid', sql.Int, b.Paid ? 1 : 0)
+          .input('PaymentDate', sql.Date, b.PaymentDate || null)
+          .query(`UPDATE ProspectRevenues SET Type=@Type,Amount=@Amount,Probability=@Probability,
+                  DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description,InvoiceDate=@InvoiceDate,
+                  Paid=@Paid,PaymentDate=@PaymentDate WHERE Id=@Id`);
+        return respond(context, 200, { message: 'Uppdaterad' });
+      }
+      if (method === 'DELETE' && revenueId) {
+        await db.request().input('Id', sql.Int, revenueId)
+          .query('DELETE FROM ProspectRevenues WHERE Id=@Id');
+        return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    if (path.startsWith('prospects/') && !path.includes('/revenues')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const p = req.body;
