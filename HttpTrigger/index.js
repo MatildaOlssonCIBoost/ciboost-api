@@ -15,6 +15,7 @@
 // Prospect Team/avdelning + Koncern (enhetlig kortstruktur):
 //   ALTER TABLE Prospects ADD SubName NVARCHAR(200) NULL;
 //   ALTER TABLE Prospects ADD ParentCompany NVARCHAR(200) NULL;
+//   ALTER TABLE Prospects ADD Employees INT NULL;  -- om kolumnen saknas
 // Skrivs feltåligt i prospects POST/PUT så saknade kolumner inte bryter sparning.
 //
 // Prospect-intäktsposter (server-side). Om tabellen saknas, skapa den:
@@ -164,7 +165,8 @@ module.exports = async function (context, req) {
                   .input('Id', sql.Int, newId)
                   .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
                   .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
-                  .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany WHERE Id=@Id');
+                  .input('Employees', sql.Int, p.employees != null ? p.employees : null)
+                  .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany, Employees=@Employees WHERE Id=@Id');
               } catch (e) { /* kolumnerna finns ännu inte */ }
             }
           });
@@ -254,13 +256,15 @@ module.exports = async function (context, req) {
         ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,
         ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END,
         UpdatedAt=GETDATE() WHERE Id=@Id`);
-        // Team/avdelning + Koncern i en feltålig separat UPDATE (kolumner kan saknas).
+        // Team/avdelning + Koncern + Antal anställda i en feltålig separat UPDATE
+        // (kolumner kan saknas — bryter då inte resten av prospektsparningen).
         try {
           await db.request()
             .input('Id', sql.Int, id)
             .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
             .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
-            .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany WHERE Id=@Id');
+            .input('Employees', sql.Int, p.employees != null ? p.employees : null)
+            .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany, Employees=@Employees WHERE Id=@Id');
         } catch (e) { /* kolumnerna finns ännu inte — se schemakommentar */ }
         return respond(context, 200, { message: 'Uppdaterad' });
       }
