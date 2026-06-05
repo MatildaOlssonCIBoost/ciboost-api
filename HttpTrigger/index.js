@@ -86,6 +86,17 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('Prospects','ParentCompany') IS NULL ALTER TABLE Prospects ADD ParentCompany NVARCHAR(200) NULL;
       IF COL_LENGTH('Prospects','Employees') IS NULL ALTER TABLE Prospects ADD Employees INT NULL;
       IF COL_LENGTH('Prospects','Industry') IS NULL ALTER TABLE Prospects ADD Industry NVARCHAR(100) NULL;
+      IF COL_LENGTH('Prospects','ClosedAt') IS NULL ALTER TABLE Prospects ADD ClosedAt DATE NULL;
+      IF COL_LENGTH('Prospects','Email') IS NULL ALTER TABLE Prospects ADD Email NVARCHAR(200) NULL;
+      IF COL_LENGTH('Prospects','Phone') IS NULL ALTER TABLE Prospects ADD Phone NVARCHAR(60) NULL;
+      IF COL_LENGTH('Prospects','NextActionType') IS NULL ALTER TABLE Prospects ADD NextActionType NVARCHAR(100) NULL;
+      IF COL_LENGTH('Prospects','NextActionDate') IS NULL ALTER TABLE Prospects ADD NextActionDate DATE NULL;
+      IF COL_LENGTH('Prospects','WaitingForResponse') IS NULL ALTER TABLE Prospects ADD WaitingForResponse BIT NULL;
+      IF COL_LENGTH('Prospects','RevenueCategory') IS NULL ALTER TABLE Prospects ADD RevenueCategory NVARCHAR(50) NULL;
+      IF COL_LENGTH('Prospects','ExpectedStartMonth') IS NULL ALTER TABLE Prospects ADD ExpectedStartMonth DATE NULL;
+      IF COL_LENGTH('Prospects','ValueMin') IS NULL ALTER TABLE Prospects ADD ValueMin INT NULL;
+      IF COL_LENGTH('Prospects','ValueMax') IS NULL ALTER TABLE Prospects ADD ValueMax INT NULL;
+      IF COL_LENGTH('Prospects','LostReason') IS NULL ALTER TABLE Prospects ADD LostReason NVARCHAR(100) NULL;
       IF COL_LENGTH('Customers','ParentCompany') IS NULL ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
       IF COL_LENGTH('Customers','Employees') IS NULL ALTER TABLE Customers ADD Employees INT NULL;
       IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
@@ -188,6 +199,18 @@ module.exports = async function (context, req) {
                   .input('Employees', sql.Int, p.employees != null ? p.employees : null)
                   .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany, Employees=@Employees WHERE Id=@Id');
               } catch (e) { /* kolumnerna finns ännu inte */ }
+              try {
+                await db.request()
+                  .input('Id', sql.Int, newId)
+                  .input('Email', sql.NVarChar, p.email != null ? p.email : null)
+                  .input('Phone', sql.NVarChar, p.phone != null ? p.phone : null)
+                  .input('NextActionType', sql.NVarChar, p.nextActionType != null ? p.nextActionType : null)
+                  .input('NextActionDate', sql.Date, p.nextActionDate || null)
+                  .input('WaitingForResponse', sql.Bit, p.waitingForResponse ? 1 : 0)
+                  .input('RevenueCategory', sql.NVarChar, p.revenueCategory != null ? p.revenueCategory : null)
+                  .input('ExpectedStartMonth', sql.Date, p.expectedStartMonth || null)
+                  .query('UPDATE Prospects SET Email=@Email,Phone=@Phone,NextActionType=@NextActionType,NextActionDate=@NextActionDate,WaitingForResponse=@WaitingForResponse,RevenueCategory=@RevenueCategory,ExpectedStartMonth=@ExpectedStartMonth WHERE Id=@Id');
+              } catch (e) { /* kolumnerna finns ännu inte */ }
             }
           });
         return respond(context, 201, { message: 'Skapad' });
@@ -252,6 +275,10 @@ module.exports = async function (context, req) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const p = req.body;
+        // Kärnkolumner (samma som POST) — finns garanterat, får aldrig fela.
+        // ClosedAt och övriga (eventuellt saknade) kolumner skrivs i egna
+        // feltåliga UPDATE-block nedan så att ETT saknat fält aldrig kraschar
+        // hela sparningen (det var orsaken till det röda "Fel"-märket).
         await db.request()
           .input('Id', sql.Int, id)
           .input('Company', sql.NVarChar, p.company)
@@ -267,25 +294,42 @@ module.exports = async function (context, req) {
           .input('LastContact', sql.Date, p.lastContact || null)
           .input('NextMeeting', sql.Date, p.nextMeeting || null)
           .input('Notes', sql.NVarChar, p.notes)
-          .input('ValueMin', sql.Int, p.valueMin || null)
-          .input('ValueMax', sql.Int, p.valueMax || null)
-          .input('LostReason', sql.NVarChar, p.lostReason || null)
           .query(`UPDATE Prospects SET Company=@Company,Industry=@Industry,Contact=@Contact,Role=@Role,
         Source=@Source,Owner=@Owner,Stage=@Stage,Score=@Score,Value=@Value,Probability=@Probability,
-        LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,
-        ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,
-        ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END,
-        UpdatedAt=GETDATE() WHERE Id=@Id`);
-        // Team/avdelning + Koncern + Antal anställda i en feltålig separat UPDATE
-        // (kolumner kan saknas — bryter då inte resten av prospektsparningen).
+        LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,UpdatedAt=GETDATE() WHERE Id=@Id`);
+        // Värde-spann + förlustorsak.
         try {
-          await db.request()
-            .input('Id', sql.Int, id)
+          await db.request().input('Id', sql.Int, id)
+            .input('ValueMin', sql.Int, p.valueMin || null)
+            .input('ValueMax', sql.Int, p.valueMax || null)
+            .input('LostReason', sql.NVarChar, p.lostReason || null)
+            .query('UPDATE Prospects SET ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason WHERE Id=@Id');
+        } catch (e) {}
+        // ClosedAt-stämpling (kolumnen kan saknas).
+        try {
+          await db.request().input('Id', sql.Int, id).input('Stage', sql.NVarChar, p.stage)
+            .query(`UPDATE Prospects SET ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END WHERE Id=@Id`);
+        } catch (e) {}
+        // Team/avdelning + Koncern + Antal anställda.
+        try {
+          await db.request().input('Id', sql.Int, id)
             .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
             .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
             .input('Employees', sql.Int, p.employees != null ? p.employees : null)
             .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany, Employees=@Employees WHERE Id=@Id');
-        } catch (e) { /* kolumnerna finns ännu inte — se schemakommentar */ }
+        } catch (e) {}
+        // Kontaktuppgifter + nästa steg + pipeline-metadata.
+        try {
+          await db.request().input('Id', sql.Int, id)
+            .input('Email', sql.NVarChar, p.email != null ? p.email : null)
+            .input('Phone', sql.NVarChar, p.phone != null ? p.phone : null)
+            .input('NextActionType', sql.NVarChar, p.nextActionType != null ? p.nextActionType : null)
+            .input('NextActionDate', sql.Date, p.nextActionDate || null)
+            .input('WaitingForResponse', sql.Bit, p.waitingForResponse ? 1 : 0)
+            .input('RevenueCategory', sql.NVarChar, p.revenueCategory != null ? p.revenueCategory : null)
+            .input('ExpectedStartMonth', sql.Date, p.expectedStartMonth || null)
+            .query('UPDATE Prospects SET Email=@Email,Phone=@Phone,NextActionType=@NextActionType,NextActionDate=@NextActionDate,WaitingForResponse=@WaitingForResponse,RevenueCategory=@RevenueCategory,ExpectedStartMonth=@ExpectedStartMonth WHERE Id=@Id');
+        } catch (e) {}
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
