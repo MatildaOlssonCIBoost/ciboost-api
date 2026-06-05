@@ -342,6 +342,23 @@ module.exports = async function (context, req) {
           .query('INSERT INTO CustomerActivities (CustomerId,Type,Note,CreatedBy) VALUES (@CustomerId,@Type,@Note,@CreatedBy)');
         return respond(context, 201, { message: 'Aktivitet sparad' });
       }
+      // /activities/customer/:customerId/:activityId — redigera/ta bort en post.
+      const custActId = path.split('/')[3];
+      if (method === 'PUT' && custActId) {
+        const a = req.body || {};
+        await db.request()
+          .input('Id', sql.Int, custActId)
+          .input('Type', sql.NVarChar, a.type)
+          .input('Note', sql.NVarChar, a.note)
+          .input('CreatedAt', sql.DateTime, a.date || null)
+          .query('UPDATE CustomerActivities SET Type=@Type, Note=@Note, CreatedAt=COALESCE(@CreatedAt,CreatedAt) WHERE Id=@Id');
+        return respond(context, 200, { message: 'Uppdaterad' });
+      }
+      if (method === 'DELETE' && custActId) {
+        await db.request().input('Id', sql.Int, custActId)
+          .query('DELETE FROM CustomerActivities WHERE Id=@Id');
+        return respond(context, 200, { message: 'Borttagen' });
+      }
     }
 
     if (path.startsWith('revenues/') && path.includes('/commissions')) {
@@ -594,11 +611,23 @@ module.exports = async function (context, req) {
       return respond(context, 201, { message: 'Aktivitet sparad' });
     }
 
-    // DELETE /activities/:id — ta bort en enskild aktivitet (prospekt-tidslinje).
-    if (path.startsWith('activities/') && method === 'DELETE' && /^\d+$/.test(path.split('/')[1] || '')) {
+    // PUT/DELETE /activities/:id — redigera/ta bort en enskild aktivitet (prospekt-tidslinje).
+    if (path.startsWith('activities/') && /^\d+$/.test(path.split('/')[1] || '')) {
       const aid = path.split('/')[1];
-      await db.request().input('Id', sql.Int, aid).query('DELETE FROM Activities WHERE Id=@Id');
-      return respond(context, 200, { message: 'Borttagen' });
+      if (method === 'PUT') {
+        const a = req.body || {};
+        await db.request()
+          .input('Id', sql.Int, aid)
+          .input('Type', sql.NVarChar, a.type)
+          .input('Note', sql.NVarChar, a.note)
+          .input('CreatedAt', sql.DateTime, a.date || null)
+          .query('UPDATE Activities SET Type=@Type, Note=@Note, CreatedAt=COALESCE(@CreatedAt,CreatedAt) WHERE Id=@Id');
+        return respond(context, 200, { message: 'Uppdaterad' });
+      }
+      if (method === 'DELETE') {
+        await db.request().input('Id', sql.Int, aid).query('DELETE FROM Activities WHERE Id=@Id');
+        return respond(context, 200, { message: 'Borttagen' });
+      }
     }
 
     if (path.startsWith('activities/prospect/')) {
