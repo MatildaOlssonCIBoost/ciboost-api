@@ -16,6 +16,10 @@
 //   ALTER TABLE Prospects ADD SubName NVARCHAR(200) NULL;
 //   ALTER TABLE Prospects ADD ParentCompany NVARCHAR(200) NULL;
 // Skrivs feltåligt i prospects POST/PUT så saknade kolumner inte bryter sparning.
+//
+// Viktning per prospekt-intäktspost (lagras i objektet; persisteras via det
+// klientlager som används för prospect-intäkter):
+//   ALTER TABLE ProspectRevenues ADD Probability INT NULL;
 // Dessa skrivs via en feltålig separat UPDATE i customers PUT, så saknade
 // kolumner bryter inte resten av kundsparningen.
 //
