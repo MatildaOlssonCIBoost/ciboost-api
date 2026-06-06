@@ -6,3 +6,4 @@
 ciboost-app
 index.html
 .funcignore
+deploy.ps1
