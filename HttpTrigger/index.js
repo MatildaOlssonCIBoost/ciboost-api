@@ -498,7 +498,10 @@ module.exports = async function (context, req) {
           .input('DateFrom', sql.Date, r.dateFrom || null)
           .input('DateTo', sql.Date, r.dateTo || null)
           .input('Description', sql.NVarChar, r.description || null)
-          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description)');
+          .input('InvoiceDate', sql.Date, r.invoiceDate || null)
+          .input('Paid', sql.Int, r.paid ? 1 : 0)
+          .input('PaymentDate', sql.Date, r.paymentDate || null)
+          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate)');
         const inserted = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT TOP 1 Id FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
         return respond(context, 201, { message: 'Intäkt sparad', id: inserted.recordset[0]?.Id });
@@ -513,7 +516,10 @@ module.exports = async function (context, req) {
           .input('DateFrom', sql.Date, r.dateFrom || null)
           .input('DateTo', sql.Date, r.dateTo || null)
           .input('Description', sql.NVarChar, r.description || null)
-          .query('UPDATE CustomerRevenues SET Type=@Type,Amount=@Amount,DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description WHERE Id=@Id');
+          .input('InvoiceDate', sql.Date, r.invoiceDate || null)
+          .input('Paid', sql.Int, r.paid ? 1 : 0)
+          .input('PaymentDate', sql.Date, r.paymentDate || null)
+          .query('UPDATE CustomerRevenues SET Type=@Type,Amount=@Amount,DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description,InvoiceDate=@InvoiceDate,Paid=@Paid,PaymentDate=@PaymentDate WHERE Id=@Id');
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
@@ -575,6 +581,9 @@ module.exports = async function (context, req) {
           .input('CommissionAmount', sql.Int, c.commissionAmount)
           .input('Notes', sql.NVarChar, c.notes)
           .input('Owner', sql.NVarChar, c.owner)
+          .input('ParentCompany', sql.NVarChar, c.parentCompany != null ? c.parentCompany : null)
+          .input('Employees', sql.Int, c.employees != null ? c.employees : null)
+          .input('Industry', sql.NVarChar, c.industry != null ? c.industry : null)
           .query(`UPDATE Customers SET
             Company=@Company, SubName=@SubName, Contact=@Contact, ContactRole=@ContactRole,
             ContactEmail=@ContactEmail, ContactPhone=@ContactPhone,
@@ -588,18 +597,13 @@ module.exports = async function (context, req) {
             MeetingLeader1Phone=@MeetingLeader1Phone, MeetingLeader2=@MeetingLeader2,
             MeetingLeader2Email=@MeetingLeader2Email, MeetingLeader2Phone=@MeetingLeader2Phone,
             CommissionSalesperson=@CommissionSalesperson, CommissionPercent=@CommissionPercent,
-            CommissionAmount=@CommissionAmount, Notes=@Notes, Owner=@Owner
+            CommissionAmount=@CommissionAmount, Notes=@Notes, Owner=@Owner,
+            ParentCompany=@ParentCompany, Employees=@Employees, Industry=@Industry
             WHERE Id=@Id`);
-        // Koncern/Antal anställda/Bransch i en egen, feltålig UPDATE så att en
-        // ev. saknad kolumn inte fäller hela kundsparningen.
-        try {
-          await db.request()
-            .input('Id', sql.Int, id)
-            .input('ParentCompany', sql.NVarChar, c.parentCompany != null ? c.parentCompany : null)
-            .input('Employees', sql.Int, c.employees != null ? c.employees : null)
-            .input('Industry', sql.NVarChar, c.industry != null ? c.industry : null)
-            .query('UPDATE Customers SET ParentCompany=@ParentCompany, Employees=@Employees, Industry=@Industry WHERE Id=@Id');
-        } catch (e) { /* kolumnerna finns ännu inte — se ALTER nedan i schemakommentaren */ }
+        // Koncern/Antal anställda/Bransch skrivs nu atomärt i samma UPDATE ovan.
+        // En lyckad 200 betyder därmed att ALLA fält faktiskt skrevs. Kolumnerna
+        // säkras av ensureSchemaColumns vid cold start; saknas de kastar UPDATE:n
+        // och fångas av yttre catch → 500 (inget tyst sväljande av fel längre).
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
