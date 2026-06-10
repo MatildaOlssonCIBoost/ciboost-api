@@ -625,9 +625,13 @@ module.exports = async function (context, req) {
       }
       if (method === 'POST') {
         const c = req.body;
-        await db.request()
+        const ins = await db.request()
           .input('Company', sql.NVarChar, c.company)
           .input('Contact', sql.NVarChar, c.contact)
+          .input('ContactRole', sql.NVarChar, c.contactRole)
+          .input('ContactEmail', sql.NVarChar, c.contactEmail)
+          .input('ContactPhone', sql.NVarChar, c.contactPhone)
+          .input('CustomerSince', sql.Date, c.customerSince || null)
           .input('Owner', sql.NVarChar, c.owner)
           .input('SubName', sql.NVarChar, c.subName)
           .input('LicenseType', sql.NVarChar, c.licenseType)
@@ -644,9 +648,10 @@ module.exports = async function (context, req) {
           .input('ParentCompany', sql.NVarChar, c.parentCompany != null ? c.parentCompany : null)
           .input('Employees', sql.Int, c.employees != null ? c.employees : null)
           .input('Industry', sql.NVarChar, c.industry != null ? c.industry : null)
-          .query(`INSERT INTO Customers (Company,Contact,Owner,SubName,LicenseType,LicenseStart,LicenseEnd,ARR,ARR_Fixed,Revenue_Training,Revenue_Training_Date,Revenue_Consulting,Revenue_Consulting_Date,Risk,Notes,ParentCompany,Employees,Industry)
-                  VALUES (@Company,@Contact,@Owner,@SubName,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@ARR_Fixed,@Revenue_Training,@Revenue_Training_Date,@Revenue_Consulting,@Revenue_Consulting_Date,@Risk,@Notes,@ParentCompany,@Employees,@Industry)`);
-        return respond(context, 201, { message: 'Kund skapad' });
+          .query(`INSERT INTO Customers (Company,Contact,ContactRole,ContactEmail,ContactPhone,CustomerSince,Owner,SubName,LicenseType,LicenseStart,LicenseEnd,ARR,ARR_Fixed,Revenue_Training,Revenue_Training_Date,Revenue_Consulting,Revenue_Consulting_Date,Risk,Notes,ParentCompany,Employees,Industry)
+                  OUTPUT INSERTED.Id
+                  VALUES (@Company,@Contact,@ContactRole,@ContactEmail,@ContactPhone,@CustomerSince,@Owner,@SubName,@LicenseType,@LicenseStart,@LicenseEnd,@ARR,@ARR_Fixed,@Revenue_Training,@Revenue_Training_Date,@Revenue_Consulting,@Revenue_Consulting_Date,@Risk,@Notes,@ParentCompany,@Employees,@Industry)`);
+        return respond(context, 201, { message: 'Kund skapad', Id: ins.recordset[0] ? ins.recordset[0].Id : null });
       }
     }
 
