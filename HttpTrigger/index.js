@@ -172,7 +172,7 @@ module.exports = async function (context, req) {
       }
       if (method === 'POST') {
         const p = req.body;
-        await db.request()
+        const ins = await db.request()
           .input('Company', sql.NVarChar, p.company)
           .input('Industry', sql.NVarChar, p.industry)
           .input('Contact', sql.NVarChar, p.contact)
@@ -186,35 +186,22 @@ module.exports = async function (context, req) {
           .input('LastContact', sql.Date, p.lastContact || null)
           .input('NextMeeting', sql.Date, p.nextMeeting || null)
           .input('Notes', sql.NVarChar, p.notes)
-          .query(`INSERT INTO Prospects (Company,Industry,Contact,Role,Source,Owner,Stage,Score,Value,Probability,LastContact,NextMeeting,Notes)
+          .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
+          .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
+          .input('Employees', sql.Int, p.employees != null ? p.employees : null)
+          .input('Email', sql.NVarChar, p.email != null ? p.email : null)
+          .input('Phone', sql.NVarChar, p.phone != null ? p.phone : null)
+          .input('NextActionType', sql.NVarChar, p.nextActionType != null ? p.nextActionType : null)
+          .input('NextActionDate', sql.Date, p.nextActionDate || null)
+          .input('WaitingForResponse', sql.Bit, p.waitingForResponse ? 1 : 0)
+          .input('RevenueCategory', sql.NVarChar, p.revenueCategory != null ? p.revenueCategory : null)
+          .input('ExpectedStartMonth', sql.Date, p.expectedStartMonth || null)
+          // Alla fält skrivs atomärt i INSERT:en (inget tyst sväljande). Kolumnerna
+          // säkras av ensureSchemaColumns; saknas de kastar satsen → yttre catch → 500.
+          .query(`INSERT INTO Prospects (Company,Industry,Contact,Role,Source,Owner,Stage,Score,Value,Probability,LastContact,NextMeeting,Notes,SubName,ParentCompany,Employees,Email,Phone,NextActionType,NextActionDate,WaitingForResponse,RevenueCategory,ExpectedStartMonth)
                   OUTPUT INSERTED.Id
-                  VALUES (@Company,@Industry,@Contact,@Role,@Source,@Owner,@Stage,@Score,@Value,@Probability,@LastContact,@NextMeeting,@Notes)`)
-          .then(async r => {
-            const newId = r.recordset && r.recordset[0] ? r.recordset[0].Id : null;
-            if (newId) {
-              try {
-                await db.request()
-                  .input('Id', sql.Int, newId)
-                  .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
-                  .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
-                  .input('Employees', sql.Int, p.employees != null ? p.employees : null)
-                  .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany, Employees=@Employees WHERE Id=@Id');
-              } catch (e) { /* kolumnerna finns ännu inte */ }
-              try {
-                await db.request()
-                  .input('Id', sql.Int, newId)
-                  .input('Email', sql.NVarChar, p.email != null ? p.email : null)
-                  .input('Phone', sql.NVarChar, p.phone != null ? p.phone : null)
-                  .input('NextActionType', sql.NVarChar, p.nextActionType != null ? p.nextActionType : null)
-                  .input('NextActionDate', sql.Date, p.nextActionDate || null)
-                  .input('WaitingForResponse', sql.Bit, p.waitingForResponse ? 1 : 0)
-                  .input('RevenueCategory', sql.NVarChar, p.revenueCategory != null ? p.revenueCategory : null)
-                  .input('ExpectedStartMonth', sql.Date, p.expectedStartMonth || null)
-                  .query('UPDATE Prospects SET Email=@Email,Phone=@Phone,NextActionType=@NextActionType,NextActionDate=@NextActionDate,WaitingForResponse=@WaitingForResponse,RevenueCategory=@RevenueCategory,ExpectedStartMonth=@ExpectedStartMonth WHERE Id=@Id');
-              } catch (e) { /* kolumnerna finns ännu inte */ }
-            }
-          });
-        return respond(context, 201, { message: 'Skapad' });
+                  VALUES (@Company,@Industry,@Contact,@Role,@Source,@Owner,@Stage,@Score,@Value,@Probability,@LastContact,@NextMeeting,@Notes,@SubName,@ParentCompany,@Employees,@Email,@Phone,@NextActionType,@NextActionDate,@WaitingForResponse,@RevenueCategory,@ExpectedStartMonth)`);
+        return respond(context, 201, { message: 'Skapad', Id: ins.recordset[0] ? ins.recordset[0].Id : null });
       }
     }
 
@@ -276,10 +263,10 @@ module.exports = async function (context, req) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const p = req.body;
-        // Kärnkolumner (samma som POST) — finns garanterat, får aldrig fela.
-        // ClosedAt och övriga (eventuellt saknade) kolumner skrivs i egna
-        // feltåliga UPDATE-block nedan så att ETT saknat fält aldrig kraschar
-        // hela sparningen (det var orsaken till det röda "Fel"-märket).
+        // Alla fält (inkl. koncern/bransch/kontakt/pipeline-metadata + ClosedAt)
+        // skrivs nu atomärt i SAMMA UPDATE — inget tyst sväljande. En lyckad 200
+        // betyder att ALLT skrevs; saknad kolumn kastar satsen → yttre catch → 500.
+        // Kolumnerna säkras av ensureSchemaColumns vid varje request.
         await db.request()
           .input('Id', sql.Int, id)
           .input('Company', sql.NVarChar, p.company)
@@ -295,42 +282,28 @@ module.exports = async function (context, req) {
           .input('LastContact', sql.Date, p.lastContact || null)
           .input('NextMeeting', sql.Date, p.nextMeeting || null)
           .input('Notes', sql.NVarChar, p.notes)
+          .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
+          .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
+          .input('Employees', sql.Int, p.employees != null ? p.employees : null)
+          .input('Email', sql.NVarChar, p.email != null ? p.email : null)
+          .input('Phone', sql.NVarChar, p.phone != null ? p.phone : null)
+          .input('NextActionType', sql.NVarChar, p.nextActionType != null ? p.nextActionType : null)
+          .input('NextActionDate', sql.Date, p.nextActionDate || null)
+          .input('WaitingForResponse', sql.Bit, p.waitingForResponse ? 1 : 0)
+          .input('RevenueCategory', sql.NVarChar, p.revenueCategory != null ? p.revenueCategory : null)
+          .input('ExpectedStartMonth', sql.Date, p.expectedStartMonth || null)
+          .input('ValueMin', sql.Int, p.valueMin || null)
+          .input('ValueMax', sql.Int, p.valueMax || null)
+          .input('LostReason', sql.NVarChar, p.lostReason || null)
           .query(`UPDATE Prospects SET Company=@Company,Industry=@Industry,Contact=@Contact,Role=@Role,
         Source=@Source,Owner=@Owner,Stage=@Stage,Score=@Score,Value=@Value,Probability=@Probability,
-        LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,UpdatedAt=GETDATE() WHERE Id=@Id`);
-        // Värde-spann + förlustorsak.
-        try {
-          await db.request().input('Id', sql.Int, id)
-            .input('ValueMin', sql.Int, p.valueMin || null)
-            .input('ValueMax', sql.Int, p.valueMax || null)
-            .input('LostReason', sql.NVarChar, p.lostReason || null)
-            .query('UPDATE Prospects SET ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason WHERE Id=@Id');
-        } catch (e) {}
-        // ClosedAt-stämpling (kolumnen kan saknas).
-        try {
-          await db.request().input('Id', sql.Int, id).input('Stage', sql.NVarChar, p.stage)
-            .query(`UPDATE Prospects SET ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END WHERE Id=@Id`);
-        } catch (e) {}
-        // Team/avdelning + Koncern + Antal anställda.
-        try {
-          await db.request().input('Id', sql.Int, id)
-            .input('SubName', sql.NVarChar, p.subName != null ? p.subName : null)
-            .input('ParentCompany', sql.NVarChar, p.parentCompany != null ? p.parentCompany : null)
-            .input('Employees', sql.Int, p.employees != null ? p.employees : null)
-            .query('UPDATE Prospects SET SubName=@SubName, ParentCompany=@ParentCompany, Employees=@Employees WHERE Id=@Id');
-        } catch (e) {}
-        // Kontaktuppgifter + nästa steg + pipeline-metadata.
-        try {
-          await db.request().input('Id', sql.Int, id)
-            .input('Email', sql.NVarChar, p.email != null ? p.email : null)
-            .input('Phone', sql.NVarChar, p.phone != null ? p.phone : null)
-            .input('NextActionType', sql.NVarChar, p.nextActionType != null ? p.nextActionType : null)
-            .input('NextActionDate', sql.Date, p.nextActionDate || null)
-            .input('WaitingForResponse', sql.Bit, p.waitingForResponse ? 1 : 0)
-            .input('RevenueCategory', sql.NVarChar, p.revenueCategory != null ? p.revenueCategory : null)
-            .input('ExpectedStartMonth', sql.Date, p.expectedStartMonth || null)
-            .query('UPDATE Prospects SET Email=@Email,Phone=@Phone,NextActionType=@NextActionType,NextActionDate=@NextActionDate,WaitingForResponse=@WaitingForResponse,RevenueCategory=@RevenueCategory,ExpectedStartMonth=@ExpectedStartMonth WHERE Id=@Id');
-        } catch (e) {}
+        LastContact=@LastContact,NextMeeting=@NextMeeting,Notes=@Notes,
+        SubName=@SubName,ParentCompany=@ParentCompany,Employees=@Employees,
+        Email=@Email,Phone=@Phone,NextActionType=@NextActionType,NextActionDate=@NextActionDate,
+        WaitingForResponse=@WaitingForResponse,RevenueCategory=@RevenueCategory,ExpectedStartMonth=@ExpectedStartMonth,
+        ValueMin=@ValueMin,ValueMax=@ValueMax,LostReason=@LostReason,
+        ClosedAt=CASE WHEN @Stage IN ('Closed Won','Closed Lost') AND ClosedAt IS NULL THEN CAST(GETDATE() AS DATE) ELSE ClosedAt END,
+        UpdatedAt=GETDATE() WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
