@@ -52,6 +52,15 @@
 //     Notes NVARCHAR(MAX) NULL,
 //     CreatedAt DATETIME DEFAULT GETDATE()
 //   );
+//   CREATE TABLE RevenueLinks (
+//     Id INT IDENTITY(1,1) PRIMARY KEY,
+//     FromRevenueId INT NOT NULL,   -- posten som fortsätter/ersätts
+//     ToRevenueId   INT NOT NULL,   -- posten den fortsätter/ersätts av
+//     CreatedAt     DATETIME DEFAULT GETDATE(),
+//     CONSTRAINT UQ_RevenueLinks UNIQUE (FromRevenueId, ToRevenueId)
+//   );
+// RevenueLinks self-healas + backfillas (från CustomerRevenues.RenewedFromId) i
+// ensureSchemaColumns; ersätter på sikt RenewedFromId (kvar som backup tills UI/churn migrerats).
 // Until those tables/columns exist, riskSnapshot/renewalOutcome/modelAnalysis
 // and the ClosedAt stamping in prospects PUT will fail with "Invalid column name".
 
@@ -102,9 +111,27 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
       IF COL_LENGTH('CustomerRevenues','RenewedFromId') IS NULL ALTER TABLE CustomerRevenues ADD RenewedFromId INT NULL;
       IF OBJECT_ID('RenewalOutcomes') IS NOT NULL AND COL_LENGTH('RenewalOutcomes','ChurnReason') IS NULL ALTER TABLE RenewalOutcomes ADD ChurnReason NVARCHAR(100) NULL;
+      IF OBJECT_ID('RevenueLinks') IS NULL
+        CREATE TABLE RevenueLinks (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          FromRevenueId INT NOT NULL,
+          ToRevenueId INT NOT NULL,
+          CreatedAt DATETIME DEFAULT GETDATE(),
+          CONSTRAINT UQ_RevenueLinks UNIQUE (FromRevenueId, ToRevenueId)
+        );
+    `);
+    // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
+    // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
+    // referens-compilefel). NOT EXISTS (+ UNIQUE) gör den säker att köra varje cold
+    // start och fångar nya RenewedFromId-länkar tills Förnya/väljaren byggts om.
+    await db.request().query(`
+      INSERT INTO RevenueLinks (FromRevenueId, ToRevenueId)
+      SELECT cr.RenewedFromId, cr.Id FROM CustomerRevenues cr
+      WHERE cr.RenewedFromId IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM RevenueLinks rl WHERE rl.FromRevenueId = cr.RenewedFromId AND rl.ToRevenueId = cr.Id);
     `);
     _colsEnsured = true;
-  } catch (e) { /* saknar ALTER-rättighet — fält sparas först när kolumnerna finns */ }
+  } catch (e) { /* saknar ALTER/CREATE-rättighet — fält/länkar sparas först när schemat finns */ }
 }
 
 function calculateRiskScore({ steps = [], satisfaction = 0, activityLevel = '', economy = 'unknown', focus = 'unknown' } = {}) {
@@ -397,6 +424,51 @@ module.exports = async function (context, req) {
         await db.request().input('Id', sql.Int, custActId)
           .query('DELETE FROM CustomerActivities WHERE Id=@Id');
         return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    // ─── REVENUE LINKS (förgrening över kundkort, steg 1) ────────
+    // Många-till-många mellan intäktsposter: en rad = FromRevenueId fortsätter/
+    // ersätts av ToRevenueId. Additivt vid sidan av RenewedFromId (backup).
+    // Routing: 'revenues/links' och 'revenues/links/{id}' matchas FÖRE den per-post
+    // 'revenues/{id}/links' (kräver numeriskt id) och commissions/generiska revenues.
+    if (path === 'revenues/links') {
+      if (method === 'GET') {
+        const result = await db.request().query('SELECT * FROM RevenueLinks ORDER BY Id ASC');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const l = req.body || {};
+        const from = l.fromRevenueId, to = l.toRevenueId;
+        if (from == null || to == null || Number(from) === Number(to)) {
+          return respond(context, 400, { error: 'Ogiltig länk (saknar from/to eller self-link)' });
+        }
+        // Dedup: skapa bara om paret saknas (UNIQUE skyddar dessutom). Returnera id.
+        const ins = await db.request()
+          .input('From', sql.Int, from)
+          .input('To', sql.Int, to)
+          .query(`IF NOT EXISTS (SELECT 1 FROM RevenueLinks WHERE FromRevenueId=@From AND ToRevenueId=@To)
+                    INSERT INTO RevenueLinks (FromRevenueId, ToRevenueId) VALUES (@From, @To);
+                  SELECT Id FROM RevenueLinks WHERE FromRevenueId=@From AND ToRevenueId=@To;`);
+        return respond(context, 200, { message: 'Länk sparad', id: ins.recordset[0]?.Id });
+      }
+    }
+
+    if (path.startsWith('revenues/links/')) {
+      if (method === 'DELETE') {
+        const linkId = path.split('/')[2];
+        await db.request().input('Id', sql.Int, linkId)
+          .query('DELETE FROM RevenueLinks WHERE Id=@Id');
+        return respond(context, 200, { message: 'Länk borttagen' });
+      }
+    }
+
+    if (path.startsWith('revenues/') && path.endsWith('/links') && /^\d+$/.test(path.split('/')[1] || '')) {
+      const revenueId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request().input('Id', sql.Int, revenueId)
+          .query('SELECT * FROM RevenueLinks WHERE FromRevenueId=@Id OR ToRevenueId=@Id ORDER BY Id ASC');
+        return respond(context, 200, result.recordset);
       }
     }
 
