@@ -100,6 +100,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('Customers','ParentCompany') IS NULL ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
       IF COL_LENGTH('Customers','Employees') IS NULL ALTER TABLE Customers ADD Employees INT NULL;
       IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
+      IF COL_LENGTH('CustomerRevenues','RenewedFromId') IS NULL ALTER TABLE CustomerRevenues ADD RenewedFromId INT NULL;
       IF OBJECT_ID('RenewalOutcomes') IS NOT NULL AND COL_LENGTH('RenewalOutcomes','ChurnReason') IS NULL ALTER TABLE RenewalOutcomes ADD ChurnReason NVARCHAR(100) NULL;
     `);
     _colsEnsured = true;
@@ -474,7 +475,8 @@ module.exports = async function (context, req) {
           .input('InvoiceDate', sql.Date, r.invoiceDate || null)
           .input('Paid', sql.Int, r.paid ? 1 : 0)
           .input('PaymentDate', sql.Date, r.paymentDate || null)
-          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate)');
+          .input('RenewedFromId', sql.Int, r.renewedFromId != null ? r.renewedFromId : null)
+          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate,RenewedFromId) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate,@RenewedFromId)');
         const inserted = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT TOP 1 Id FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
         return respond(context, 201, { message: 'Intäkt sparad', id: inserted.recordset[0]?.Id });
@@ -493,6 +495,15 @@ module.exports = async function (context, req) {
           .input('Paid', sql.Int, r.paid ? 1 : 0)
           .input('PaymentDate', sql.Date, r.paymentDate || null)
           .query('UPDATE CustomerRevenues SET Type=@Type,Amount=@Amount,DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description,InvoiceDate=@InvoiceDate,Paid=@Paid,PaymentDate=@PaymentDate WHERE Id=@Id');
+        // RenewedFromId rörs ENDAST när klienten faktiskt skickar fältet (Förnya /
+        // retroaktiv länkning, steg 2-3). En vanlig redigering (editRevenueItem)
+        // skickar det inte → länken bevaras. Skicka null för att avlänka explicit.
+        if (r.renewedFromId !== undefined) {
+          await db.request()
+            .input('Id', sql.Int, revenueId)
+            .input('RenewedFromId', sql.Int, r.renewedFromId != null ? r.renewedFromId : null)
+            .query('UPDATE CustomerRevenues SET RenewedFromId=@RenewedFromId WHERE Id=@Id');
+        }
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
