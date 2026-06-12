@@ -119,6 +119,15 @@ async function ensureSchemaColumns(db) {
           CreatedAt DATETIME DEFAULT GETDATE(),
           CONSTRAINT UQ_RevenueLinks UNIQUE (FromRevenueId, ToRevenueId)
         );
+      IF OBJECT_ID('BudgetMonthLocks') IS NULL
+        CREATE TABLE BudgetMonthLocks (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          VersionId INT NOT NULL,
+          Month NVARCHAR(3) NOT NULL,
+          LockedBy NVARCHAR(200) NULL,
+          LockedAt DATETIME DEFAULT GETDATE(),
+          CONSTRAINT UQ_BudgetMonthLocks UNIQUE (VersionId, Month)
+        );
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -788,7 +797,7 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('budget-versions/') && !path.includes('/rows')) {
+    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks')) {
       const versionId = path.split('/')[1];
       if (method === 'PUT') {
         const b = req.body;
@@ -832,6 +841,38 @@ module.exports = async function (context, req) {
             .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Source,ImportedAt,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Source,@ImportedAt,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
         }
         return respond(context, 200, { message: 'Budget sparad' });
+      }
+    }
+
+    // Månadslås per budgetversion (BudgetMonthLocks). Det generiska budget-versions/-
+    // blocket ovan exkluderar /locks (precis som /rows), annars skulle DELETE
+    // .../locks/{month} tolkas som radering av hela versionen. Lås per (VersionId, Month)
+    // via UNIQUE; POST är idempotent.
+    if (path.startsWith('budget-versions/') && path.includes('/locks')) {
+      const versionId = path.split('/')[1];
+      const month = path.split('/')[3];   // endast satt vid DELETE .../locks/{month}
+      if (method === 'GET') {
+        const result = await db.request().input('VersionId', sql.Int, versionId)
+          .query('SELECT * FROM BudgetMonthLocks WHERE VersionId=@VersionId');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const b = req.body || {};
+        // IF NOT EXISTS gör POST idempotent (UNIQUE-violation → 500 annars) — samma
+        // mönster som RevenueLinks-backfillen.
+        await db.request()
+          .input('VersionId', sql.Int, versionId)
+          .input('Month', sql.NVarChar, b.month)
+          .input('LockedBy', sql.NVarChar, b.lockedBy || '')
+          .query('IF NOT EXISTS (SELECT 1 FROM BudgetMonthLocks WHERE VersionId=@VersionId AND Month=@Month) INSERT INTO BudgetMonthLocks (VersionId,Month,LockedBy) VALUES (@VersionId,@Month,@LockedBy)');
+        return respond(context, 201, { message: 'Låst' });
+      }
+      if (method === 'DELETE') {
+        await db.request()
+          .input('VersionId', sql.Int, versionId)
+          .input('Month', sql.NVarChar, month)
+          .query('DELETE FROM BudgetMonthLocks WHERE VersionId=@VersionId AND Month=@Month');
+        return respond(context, 200, { message: 'Upplåst' });
       }
     }
 
