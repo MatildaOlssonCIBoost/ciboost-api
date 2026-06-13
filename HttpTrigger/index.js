@@ -812,7 +812,7 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks')) {
+    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks') && !path.includes('/import-assumptions')) {
       const versionId = path.split('/')[1];
       if (method === 'PUT') {
         const b = req.body;
@@ -888,6 +888,18 @@ module.exports = async function (context, req) {
           .input('Month', sql.NVarChar, month)
           .query('DELETE FROM BudgetMonthLocks WHERE VersionId=@VersionId AND Month=@Month');
         return respond(context, 200, { message: 'Upplåst' });
+      }
+    }
+
+    // Importantaganden per budgetversion (BudgetImportAssumptions). Det generiska
+    // budget-versions/-blocket ovan exkluderar /import-assumptions (som /rows och /locks).
+    // DB2a: bara GET; PUT byggs i DB2b.
+    if (path.startsWith('budget-versions/') && path.includes('/import-assumptions')) {
+      const versionId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request().input('VersionId', sql.Int, versionId)
+          .query('SELECT * FROM BudgetImportAssumptions WHERE VersionId=@VersionId ORDER BY Source, ItemKey');
+        return respond(context, 200, result.recordset);
       }
     }
 
