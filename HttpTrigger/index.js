@@ -910,12 +910,13 @@ module.exports = async function (context, req) {
         const b = req.body || {};
         if (!b.source) return respond(context, 400, { message: 'source krävs' });
         const assumptions = Array.isArray(b.assumptions) ? b.assumptions : [];
-        // Full replace BARA för denna källa: DELETE filtrerar på BÅDE VersionId OCH Source,
-        // så en Förnyelse-PUT rör aldrig Pipeline-rader (och vice versa).
-        await db.request()
-          .input('VersionId', sql.Int, versionId)
-          .input('Source', sql.NVarChar, b.source)
-          .query('DELETE FROM BudgetImportAssumptions WHERE VersionId=@VersionId AND Source=@Source');
+        const remove = Array.isArray(b.remove) ? b.remove : [];
+        // Per-post UPSERT (IF EXISTS UPDATE ELSE INSERT) per (VersionId, Source, ItemKey) +
+        // explicit DELETE av exakt angivna remove-nycklar. INGEN DELETE-all-per-source:
+        // poster som varken upsertas eller tas bort lämnas orörda → en användares import
+        // raderar aldrig en annans (eller en annan månads) rader. IF EXISTS, ej MERGE,
+        // eftersom UNIQUE-constrainten ev. saknas på live (skapas bara i CREATE-grenen).
+        // Allt parametriserat; allt filtrerat på BÅDE VersionId OCH Source (källisolering).
         for (const a of assumptions) {
           await db.request()
             .input('VersionId', sql.Int, versionId)
@@ -930,9 +931,21 @@ module.exports = async function (context, req) {
             .input('SrcAmount', sql.Int, a.srcAmount != null ? a.srcAmount : null)
             .input('SrcProb', sql.Int, a.srcProb != null ? a.srcProb : null)
             .input('SrcDate', sql.Date, a.srcDate || null)
-            .query('INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy,SrcAmount,SrcProb,SrcDate) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy,@SrcAmount,@SrcProb,@SrcDate)');
+            .query(`IF EXISTS (SELECT 1 FROM BudgetImportAssumptions WHERE VersionId=@VersionId AND Source=@Source AND ItemKey=@ItemKey)
+                      UPDATE BudgetImportAssumptions SET Amount=@Amount, Prob=@Prob, AssumeDate=@AssumeDate, RefDate=@RefDate, Type=@Type, ImportedAt=GETDATE(), ImportedBy=@ImportedBy, SrcAmount=@SrcAmount, SrcProb=@SrcProb, SrcDate=@SrcDate WHERE VersionId=@VersionId AND Source=@Source AND ItemKey=@ItemKey
+                    ELSE
+                      INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy,SrcAmount,SrcProb,SrcDate) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy,@SrcAmount,@SrcProb,@SrcDate)`);
         }
-        return respond(context, 200, { message: 'Antaganden sparade', count: assumptions.length });
+        let removed = 0;
+        for (const k of remove) {
+          const dr = await db.request()
+            .input('VersionId', sql.Int, versionId)
+            .input('Source', sql.NVarChar, b.source)
+            .input('ItemKey', sql.NVarChar, k)
+            .query('DELETE FROM BudgetImportAssumptions WHERE VersionId=@VersionId AND Source=@Source AND ItemKey=@ItemKey');
+          removed += dr.rowsAffected[0] || 0;
+        }
+        return respond(context, 200, { message: 'Antaganden sparade', count: assumptions.length, removed });
       }
     }
 
