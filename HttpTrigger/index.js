@@ -893,13 +893,37 @@ module.exports = async function (context, req) {
 
     // Importantaganden per budgetversion (BudgetImportAssumptions). Det generiska
     // budget-versions/-blocket ovan exkluderar /import-assumptions (som /rows och /locks).
-    // DB2a: bara GET; PUT byggs i DB2b.
     if (path.startsWith('budget-versions/') && path.includes('/import-assumptions')) {
       const versionId = path.split('/')[1];
       if (method === 'GET') {
         const result = await db.request().input('VersionId', sql.Int, versionId)
           .query('SELECT * FROM BudgetImportAssumptions WHERE VersionId=@VersionId ORDER BY Source, ItemKey');
         return respond(context, 200, result.recordset);
+      }
+      if (method === 'PUT') {
+        const b = req.body || {};
+        if (!b.source) return respond(context, 400, { message: 'source krävs' });
+        const assumptions = Array.isArray(b.assumptions) ? b.assumptions : [];
+        // Full replace BARA för denna källa: DELETE filtrerar på BÅDE VersionId OCH Source,
+        // så en Förnyelse-PUT rör aldrig Pipeline-rader (och vice versa).
+        await db.request()
+          .input('VersionId', sql.Int, versionId)
+          .input('Source', sql.NVarChar, b.source)
+          .query('DELETE FROM BudgetImportAssumptions WHERE VersionId=@VersionId AND Source=@Source');
+        for (const a of assumptions) {
+          await db.request()
+            .input('VersionId', sql.Int, versionId)
+            .input('Source', sql.NVarChar, b.source)
+            .input('ItemKey', sql.NVarChar, a.itemKey)
+            .input('Amount', sql.Int, a.amount != null ? a.amount : null)
+            .input('Prob', sql.Int, a.prob != null ? a.prob : null)
+            .input('AssumeDate', sql.Date, a.assumeDate || null)
+            .input('RefDate', sql.Date, a.refDate || null)
+            .input('Type', sql.NVarChar, a.type || null)
+            .input('ImportedBy', sql.NVarChar, a.importedBy || null)
+            .query('INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy)');
+        }
+        return respond(context, 200, { message: 'Antaganden sparade', count: assumptions.length });
       }
     }
 
