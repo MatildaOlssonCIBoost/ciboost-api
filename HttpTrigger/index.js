@@ -128,6 +128,21 @@ async function ensureSchemaColumns(db) {
           LockedAt DATETIME DEFAULT GETDATE(),
           CONSTRAINT UQ_BudgetMonthLocks UNIQUE (VersionId, Month)
         );
+      IF OBJECT_ID('BudgetImportAssumptions') IS NULL
+        CREATE TABLE BudgetImportAssumptions (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          VersionId INT NOT NULL,
+          Source NVARCHAR(50) NOT NULL,
+          ItemKey NVARCHAR(100) NOT NULL,
+          Amount INT NULL,
+          Prob INT NULL,
+          AssumeDate DATE NULL,
+          RefDate DATE NULL,
+          Type NVARCHAR(30) NULL,
+          ImportedAt DATETIME DEFAULT GETDATE(),
+          ImportedBy NVARCHAR(200) NULL,
+          CONSTRAINT UQ_BudgetImportAssumptions UNIQUE (VersionId, Source, ItemKey)
+        );
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
