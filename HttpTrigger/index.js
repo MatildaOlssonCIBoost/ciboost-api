@@ -141,8 +141,14 @@ async function ensureSchemaColumns(db) {
           Type NVARCHAR(30) NULL,
           ImportedAt DATETIME DEFAULT GETDATE(),
           ImportedBy NVARCHAR(200) NULL,
+          SrcAmount INT NULL,
+          SrcProb INT NULL,
+          SrcDate DATE NULL,
           CONSTRAINT UQ_BudgetImportAssumptions UNIQUE (VersionId, Source, ItemKey)
         );
+      IF COL_LENGTH('BudgetImportAssumptions','SrcAmount') IS NULL ALTER TABLE BudgetImportAssumptions ADD SrcAmount INT NULL;
+      IF COL_LENGTH('BudgetImportAssumptions','SrcProb') IS NULL ALTER TABLE BudgetImportAssumptions ADD SrcProb INT NULL;
+      IF COL_LENGTH('BudgetImportAssumptions','SrcDate') IS NULL ALTER TABLE BudgetImportAssumptions ADD SrcDate DATE NULL;
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -921,7 +927,10 @@ module.exports = async function (context, req) {
             .input('RefDate', sql.Date, a.refDate || null)
             .input('Type', sql.NVarChar, a.type || null)
             .input('ImportedBy', sql.NVarChar, a.importedBy || null)
-            .query('INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy)');
+            .input('SrcAmount', sql.Int, a.srcAmount != null ? a.srcAmount : null)
+            .input('SrcProb', sql.Int, a.srcProb != null ? a.srcProb : null)
+            .input('SrcDate', sql.Date, a.srcDate || null)
+            .query('INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy,SrcAmount,SrcProb,SrcDate) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy,@SrcAmount,@SrcProb,@SrcDate)');
         }
         return respond(context, 200, { message: 'Antaganden sparade', count: assumptions.length });
       }
