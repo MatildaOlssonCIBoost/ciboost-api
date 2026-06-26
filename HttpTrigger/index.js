@@ -149,6 +149,9 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('BudgetImportAssumptions','SrcAmount') IS NULL ALTER TABLE BudgetImportAssumptions ADD SrcAmount INT NULL;
       IF COL_LENGTH('BudgetImportAssumptions','SrcProb') IS NULL ALTER TABLE BudgetImportAssumptions ADD SrcProb INT NULL;
       IF COL_LENGTH('BudgetImportAssumptions','SrcDate') IS NULL ALTER TABLE BudgetImportAssumptions ADD SrcDate DATE NULL;
+      IF COL_LENGTH('CustomerRevenues','VatRate') IS NULL ALTER TABLE CustomerRevenues ADD VatRate DECIMAL(5,2) NULL;
+      IF COL_LENGTH('ProspectRevenues','VatRate') IS NULL ALTER TABLE ProspectRevenues ADD VatRate DECIMAL(5,2) NULL;
+      IF COL_LENGTH('BudgetImportAssumptions','VatRate') IS NULL ALTER TABLE BudgetImportAssumptions ADD VatRate DECIMAL(5,2) NULL;
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -287,9 +290,10 @@ module.exports = async function (context, req) {
           .input('InvoiceDate', sql.Date, b.InvoiceDate || null)
           .input('Paid', sql.Int, b.Paid ? 1 : 0)
           .input('PaymentDate', sql.Date, b.PaymentDate || null)
-          .query(`INSERT INTO ProspectRevenues (ProspectId,Type,Amount,Probability,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate)
+          .input('VatRate', sql.Decimal(5,2), b.VatRate != null ? b.VatRate : null)
+          .query(`INSERT INTO ProspectRevenues (ProspectId,Type,Amount,Probability,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate,VatRate)
                   OUTPUT INSERTED.Id
-                  VALUES (@ProspectId,@Type,@Amount,@Probability,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate)`);
+                  VALUES (@ProspectId,@Type,@Amount,@Probability,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate,@VatRate)`);
         return respond(context, 201, { message: 'Intäkt sparad', Id: ins.recordset[0] ? ins.recordset[0].Id : null });
       }
       if (method === 'PUT' && revenueId) {
@@ -305,9 +309,10 @@ module.exports = async function (context, req) {
           .input('InvoiceDate', sql.Date, b.InvoiceDate || null)
           .input('Paid', sql.Int, b.Paid ? 1 : 0)
           .input('PaymentDate', sql.Date, b.PaymentDate || null)
+          .input('VatRate', sql.Decimal(5,2), b.VatRate != null ? b.VatRate : null)
           .query(`UPDATE ProspectRevenues SET Type=@Type,Amount=@Amount,Probability=@Probability,
                   DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description,InvoiceDate=@InvoiceDate,
-                  Paid=@Paid,PaymentDate=@PaymentDate WHERE Id=@Id`);
+                  Paid=@Paid,PaymentDate=@PaymentDate,VatRate=@VatRate WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE' && revenueId) {
@@ -577,8 +582,9 @@ module.exports = async function (context, req) {
           .input('InvoiceDate', sql.Date, r.invoiceDate || null)
           .input('Paid', sql.Int, r.paid ? 1 : 0)
           .input('PaymentDate', sql.Date, r.paymentDate || null)
+          .input('VatRate', sql.Decimal(5,2), r.vatRate != null ? r.vatRate : null)
           .input('RenewedFromId', sql.Int, r.renewedFromId != null ? r.renewedFromId : null)
-          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate,RenewedFromId) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate,@RenewedFromId)');
+          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate,VatRate,RenewedFromId) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate,@VatRate,@RenewedFromId)');
         const inserted = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT TOP 1 Id FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
         return respond(context, 201, { message: 'Intäkt sparad', id: inserted.recordset[0]?.Id });
@@ -596,7 +602,8 @@ module.exports = async function (context, req) {
           .input('InvoiceDate', sql.Date, r.invoiceDate || null)
           .input('Paid', sql.Int, r.paid ? 1 : 0)
           .input('PaymentDate', sql.Date, r.paymentDate || null)
-          .query('UPDATE CustomerRevenues SET Type=@Type,Amount=@Amount,DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description,InvoiceDate=@InvoiceDate,Paid=@Paid,PaymentDate=@PaymentDate WHERE Id=@Id');
+          .input('VatRate', sql.Decimal(5,2), r.vatRate != null ? r.vatRate : null)
+          .query('UPDATE CustomerRevenues SET Type=@Type,Amount=@Amount,DateFrom=@DateFrom,DateTo=@DateTo,Description=@Description,InvoiceDate=@InvoiceDate,Paid=@Paid,PaymentDate=@PaymentDate,VatRate=@VatRate WHERE Id=@Id');
         // RenewedFromId rörs ENDAST när klienten faktiskt skickar fältet (Förnya /
         // retroaktiv länkning, steg 2-3). En vanlig redigering (editRevenueItem)
         // skickar det inte → länken bevaras. Skicka null för att avlänka explicit.
