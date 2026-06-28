@@ -938,10 +938,11 @@ module.exports = async function (context, req) {
             .input('SrcAmount', sql.Int, a.srcAmount != null ? a.srcAmount : null)
             .input('SrcProb', sql.Int, a.srcProb != null ? a.srcProb : null)
             .input('SrcDate', sql.Date, a.srcDate || null)
+            .input('VatRate', sql.Decimal(5,2), a.vatRate != null ? a.vatRate : null)
             .query(`IF EXISTS (SELECT 1 FROM BudgetImportAssumptions WHERE VersionId=@VersionId AND Source=@Source AND ItemKey=@ItemKey)
-                      UPDATE BudgetImportAssumptions SET Amount=@Amount, Prob=@Prob, AssumeDate=@AssumeDate, RefDate=@RefDate, Type=@Type, ImportedAt=GETDATE(), ImportedBy=@ImportedBy, SrcAmount=@SrcAmount, SrcProb=@SrcProb, SrcDate=@SrcDate WHERE VersionId=@VersionId AND Source=@Source AND ItemKey=@ItemKey
+                      UPDATE BudgetImportAssumptions SET Amount=@Amount, Prob=@Prob, AssumeDate=@AssumeDate, RefDate=@RefDate, Type=@Type, ImportedAt=GETDATE(), ImportedBy=@ImportedBy, SrcAmount=@SrcAmount, SrcProb=@SrcProb, SrcDate=@SrcDate, VatRate=@VatRate WHERE VersionId=@VersionId AND Source=@Source AND ItemKey=@ItemKey
                     ELSE
-                      INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy,SrcAmount,SrcProb,SrcDate) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy,@SrcAmount,@SrcProb,@SrcDate)`);
+                      INSERT INTO BudgetImportAssumptions (VersionId,Source,ItemKey,Amount,Prob,AssumeDate,RefDate,Type,ImportedAt,ImportedBy,SrcAmount,SrcProb,SrcDate,VatRate) VALUES (@VersionId,@Source,@ItemKey,@Amount,@Prob,@AssumeDate,@RefDate,@Type,GETDATE(),@ImportedBy,@SrcAmount,@SrcProb,@SrcDate,@VatRate)`);
         }
         let removed = 0;
         for (const k of remove) {
