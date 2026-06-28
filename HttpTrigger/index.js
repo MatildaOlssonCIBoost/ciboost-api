@@ -883,8 +883,10 @@ module.exports = async function (context, req) {
         return respond(context, 200, { message: 'Uppdaterad' });
       }
       if (method === 'DELETE') {
+        // PAR-4c: nolla motpartens dinglande pekare till den raderade versionen (idempotent — 0 rader om ingen motpart),
+        // sedan kaskad-radera. Samma parametriserade @Id. Skyddar mot dangling PairedVersionId oavsett raderingsväg.
         await db.request().input('Id', sql.Int, versionId)
-          .query('DELETE FROM BudgetRows WHERE VersionId=@Id; DELETE FROM BudgetVersions WHERE Id=@Id');
+          .query('UPDATE BudgetVersions SET PairedVersionId=NULL WHERE PairedVersionId=@Id; DELETE FROM BudgetRows WHERE VersionId=@Id; DELETE FROM BudgetVersions WHERE Id=@Id');
         return respond(context, 200, { message: 'Borttagen' });
       }
     }
