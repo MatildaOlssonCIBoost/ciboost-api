@@ -154,6 +154,19 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('BudgetImportAssumptions','VatRate') IS NULL ALTER TABLE BudgetImportAssumptions ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('BudgetRows','AccountNo') IS NULL ALTER TABLE BudgetRows ADD AccountNo NVARCHAR(20) NULL;
       IF COL_LENGTH('BudgetVersions','PairedVersionId') IS NULL ALTER TABLE BudgetVersions ADD PairedVersionId INT NULL;
+      IF OBJECT_ID('SupplierRows','U') IS NULL
+        CREATE TABLE SupplierRows (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          VersionId INT NOT NULL,
+          Name NVARCHAR(200) NOT NULL,
+          Type NVARCHAR(20) NOT NULL,
+          SourceRows NVARCHAR(MAX) NULL,
+          PaymentShift INT NULL,
+          VatFactor DECIMAL(5,2) NULL,
+          Clumping NVARCHAR(10) NULL,
+          ManualAmounts NVARCHAR(MAX) NULL,
+          SortOrder INT NULL
+        );
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -870,7 +883,7 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks') && !path.includes('/import-assumptions') && !path.includes('/pair')) {
+    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks') && !path.includes('/import-assumptions') && !path.includes('/pair') && !path.includes('/suppliers')) {
       const versionId = path.split('/')[1];
       if (method === 'PUT') {
         const b = req.body;
@@ -917,6 +930,40 @@ module.exports = async function (context, req) {
             .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Source,ImportedAt,AccountNo,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Source,@ImportedAt,@AccountNo,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
         }
         return respond(context, 200, { message: 'Budget sparad' });
+      }
+    }
+
+    // F2-1: Leverantörsmodell-config per likviditetsversion (SupplierRows). Full-replace som /rows.
+    // Generiska budget-versions/-blocket ovan exkluderar /suppliers (annars tolkas PUT/DELETE som versions-CRUD).
+    // SourceRows/ManualAmounts lagras som JSON-strängar (NVARCHAR(MAX)). Additivt — rör ingen befintlig tabell.
+    if (path.startsWith('budget-versions/') && path.includes('/suppliers')) {
+      const versionId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request().input('VersionId', sql.Int, versionId)
+          .query('SELECT * FROM SupplierRows WHERE VersionId=@VersionId ORDER BY SortOrder, Id');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'PUT' || method === 'POST') {
+        const rows = Array.isArray(req.body) ? req.body : [];
+        await db.request().input('VersionId', sql.Int, versionId)
+          .query('DELETE FROM SupplierRows WHERE VersionId=@VersionId');
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i] || {};
+          const srcRows = (r.sourceRows == null) ? null : (typeof r.sourceRows === 'string' ? r.sourceRows : JSON.stringify(r.sourceRows));
+          const manAmt  = (r.manualAmounts == null) ? null : (typeof r.manualAmounts === 'string' ? r.manualAmounts : JSON.stringify(r.manualAmounts));
+          await db.request()
+            .input('VersionId', sql.Int, versionId)
+            .input('Name', sql.NVarChar(200), r.name || '')
+            .input('Type', sql.NVarChar(20), r.type || 'manual')
+            .input('SourceRows', sql.NVarChar(sql.MAX), srcRows)
+            .input('PaymentShift', sql.Int, r.paymentShift != null ? r.paymentShift : null)
+            .input('VatFactor', sql.Decimal(5, 2), r.vatFactor != null ? r.vatFactor : null)
+            .input('Clumping', sql.NVarChar(10), r.clumping || null)
+            .input('ManualAmounts', sql.NVarChar(sql.MAX), manAmt)
+            .input('SortOrder', sql.Int, r.sortOrder != null ? r.sortOrder : i)
+            .query('INSERT INTO SupplierRows (VersionId,Name,Type,SourceRows,PaymentShift,VatFactor,Clumping,ManualAmounts,SortOrder) VALUES (@VersionId,@Name,@Type,@SourceRows,@PaymentShift,@VatFactor,@Clumping,@ManualAmounts,@SortOrder)');
+        }
+        return respond(context, 200, { message: 'Leverantörer sparade' });
       }
     }
 
