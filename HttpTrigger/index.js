@@ -165,8 +165,8 @@ async function ensureSchemaColumns(db) {
       WHERE cr.RenewedFromId IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM RevenueLinks rl WHERE rl.FromRevenueId = cr.RenewedFromId AND rl.ToRevenueId = cr.Id);
     `);
-    _colsEnsured = true;
   } catch (e) { /* saknar ALTER/CREATE-rättighet — fält/länkar sparas först när schemat finns */ }
+  finally { _colsEnsured = true; }   // FIX A: sätt ovillkorligt efter första försöket → schema-batch+backfill körs MAX en gång/process, aldrig per request (annars: pool-flood → host-timeout → svar utan CORS)
 }
 
 function calculateRiskScore({ steps = [], satisfaction = 0, activityLevel = '', economy = 'unknown', focus = 'unknown' } = {}) {
