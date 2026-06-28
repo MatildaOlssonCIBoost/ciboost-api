@@ -152,6 +152,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('CustomerRevenues','VatRate') IS NULL ALTER TABLE CustomerRevenues ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('ProspectRevenues','VatRate') IS NULL ALTER TABLE ProspectRevenues ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('BudgetImportAssumptions','VatRate') IS NULL ALTER TABLE BudgetImportAssumptions ADD VatRate DECIMAL(5,2) NULL;
+      IF COL_LENGTH('BudgetRows','AccountNo') IS NULL ALTER TABLE BudgetRows ADD AccountNo NVARCHAR(20) NULL;
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -866,7 +867,8 @@ module.exports = async function (context, req) {
             .input('Apr', sql.Int, r.Apr||0).input('Maj', sql.Int, r.Maj||0).input('Jun', sql.Int, r.Jun||0)
             .input('Jul', sql.Int, r.Jul||0).input('Aug', sql.Int, r.Aug||0).input('Sep', sql.Int, r.Sep||0)
             .input('Okt', sql.Int, r.Okt||0).input('Nov', sql.Int, r.Nov||0).input('Dec', sql.Int, r.Dec||0)
-            .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Source,ImportedAt,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Source,@ImportedAt,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
+            .input('AccountNo', sql.NVarChar(20), r.accountNo != null ? r.accountNo : null)
+            .query('INSERT INTO BudgetRows (VersionId,Category,SubCategory,Source,ImportedAt,AccountNo,Jan,Feb,Mar,Apr,Maj,Jun,Jul,Aug,Sep,Okt,Nov,Dec) VALUES (@VersionId,@Category,@SubCategory,@Source,@ImportedAt,@AccountNo,@Jan,@Feb,@Mar,@Apr,@Maj,@Jun,@Jul,@Aug,@Sep,@Okt,@Nov,@Dec)');
         }
         return respond(context, 200, { message: 'Budget sparad' });
       }
