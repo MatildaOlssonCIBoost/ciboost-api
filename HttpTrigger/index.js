@@ -153,6 +153,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('ProspectRevenues','VatRate') IS NULL ALTER TABLE ProspectRevenues ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('BudgetImportAssumptions','VatRate') IS NULL ALTER TABLE BudgetImportAssumptions ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('BudgetRows','AccountNo') IS NULL ALTER TABLE BudgetRows ADD AccountNo NVARCHAR(20) NULL;
+      IF COL_LENGTH('BudgetVersions','PairedVersionId') IS NULL ALTER TABLE BudgetVersions ADD PairedVersionId INT NULL;
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -826,7 +827,50 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks') && !path.includes('/import-assumptions')) {
+    // Budgetpar (1:1, ömsesidigt). PUT /budget-versions/{id}/pair {pairedId} (number) eller {pairedId:null} (avpara).
+    // Ömsesidig set/clear i EN transaktion; rensar ev. gamla motparter så 1:1 garanteras. Parametriserad SQL; id/pairedId aldrig interpolerade.
+    if (path.startsWith('budget-versions/') && path.includes('/pair')) {
+      const versionId = parseInt(path.split('/')[1], 10);
+      if (method === 'PUT') {
+        const pairedId = (req.body && req.body.pairedId != null) ? parseInt(req.body.pairedId, 10) : null;
+        if (pairedId != null && pairedId === versionId) {
+          return respond(context, 400, { message: 'Kan inte para en version med sig själv' });
+        }
+        const tx = new sql.Transaction(db);
+        await tx.begin();
+        try {
+          if (pairedId == null) {
+            // CLEAR: nolla BÅDA sidor (A och dess nuvarande motpart B).
+            const cur = await new sql.Request(tx).input('Id', sql.Int, versionId)
+              .query('SELECT PairedVersionId FROM BudgetVersions WHERE Id=@Id');
+            const bId = cur.recordset[0] ? cur.recordset[0].PairedVersionId : null;
+            await new sql.Request(tx).input('Id', sql.Int, versionId)
+              .query('UPDATE BudgetVersions SET PairedVersionId=NULL WHERE Id=@Id');
+            if (bId != null) {
+              await new sql.Request(tx).input('Bid', sql.Int, bId)
+                .query('UPDATE BudgetVersions SET PairedVersionId=NULL WHERE Id=@Bid');
+            }
+          } else {
+            // SET A↔B: rensa ev. gamla pekare som pekar PÅ A (gammal C) resp PÅ B (gammal D), sätt sedan A↔B ömsesidigt.
+            await new sql.Request(tx).input('Aid', sql.Int, versionId)
+              .query('UPDATE BudgetVersions SET PairedVersionId=NULL WHERE PairedVersionId=@Aid');
+            await new sql.Request(tx).input('Bid', sql.Int, pairedId)
+              .query('UPDATE BudgetVersions SET PairedVersionId=NULL WHERE PairedVersionId=@Bid');
+            await new sql.Request(tx).input('Aid', sql.Int, versionId).input('Bid', sql.Int, pairedId)
+              .query('UPDATE BudgetVersions SET PairedVersionId=@Bid WHERE Id=@Aid');
+            await new sql.Request(tx).input('Aid', sql.Int, versionId).input('Bid', sql.Int, pairedId)
+              .query('UPDATE BudgetVersions SET PairedVersionId=@Aid WHERE Id=@Bid');
+          }
+          await tx.commit();
+        } catch (e) {
+          await tx.rollback();
+          throw e;
+        }
+        return respond(context, 200, { message: pairedId == null ? 'Avparad' : 'Parad' });
+      }
+    }
+
+    if (path.startsWith('budget-versions/') && !path.includes('/rows') && !path.includes('/locks') && !path.includes('/import-assumptions') && !path.includes('/pair')) {
       const versionId = path.split('/')[1];
       if (method === 'PUT') {
         const b = req.body;
