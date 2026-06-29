@@ -167,6 +167,17 @@ async function ensureSchemaColumns(db) {
           ManualAmounts NVARCHAR(MAX) NULL,
           SortOrder INT NULL
         );
+      IF OBJECT_ID('SupplierTemplates','U') IS NULL
+        CREATE TABLE SupplierTemplates (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          Name NVARCHAR(200) NOT NULL,
+          Type NVARCHAR(20) NOT NULL,
+          SourceRows NVARCHAR(MAX) NULL,
+          PaymentShift INT NULL,
+          VatFactor DECIMAL(5,2) NULL,
+          Clumping NVARCHAR(10) NULL,
+          SortOrder INT NULL
+        );
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -820,6 +831,33 @@ module.exports = async function (context, req) {
       const result = await db.request().input('ProspectId', sql.Int, id)
         .query('SELECT * FROM Activities WHERE ProspectId=@ProspectId ORDER BY CreatedAt DESC');
       return respond(context, 200, result.recordset);
+    }
+
+    // ST-1: Globala standardleverantörer (SupplierTemplates) — mall som auto-seedar nya likviditetsbudgetar.
+    // Top-level route (ej under budget-versions/ → ingen guard på version-routen behövs). Full-replace som /suppliers, minus VersionId/ManualAmounts.
+    if (path === 'supplier-templates') {
+      if (method === 'GET') {
+        const result = await db.request().query('SELECT * FROM SupplierTemplates ORDER BY SortOrder, Id');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'PUT' || method === 'POST') {
+        const rows = Array.isArray(req.body) ? req.body : [];
+        await db.request().query('DELETE FROM SupplierTemplates');
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i] || {};
+          const srcRows = (r.sourceRows == null) ? null : (typeof r.sourceRows === 'string' ? r.sourceRows : JSON.stringify(r.sourceRows));
+          await db.request()
+            .input('Name', sql.NVarChar(200), r.name || '')
+            .input('Type', sql.NVarChar(20), r.type || 'manual')
+            .input('SourceRows', sql.NVarChar(sql.MAX), srcRows)
+            .input('PaymentShift', sql.Int, r.paymentShift != null ? r.paymentShift : null)
+            .input('VatFactor', sql.Decimal(5, 2), r.vatFactor != null ? r.vatFactor : null)
+            .input('Clumping', sql.NVarChar(10), r.clumping || null)
+            .input('SortOrder', sql.Int, r.sortOrder != null ? r.sortOrder : i)
+            .query('INSERT INTO SupplierTemplates (Name,Type,SourceRows,PaymentShift,VatFactor,Clumping,SortOrder) VALUES (@Name,@Type,@SourceRows,@PaymentShift,@VatFactor,@Clumping,@SortOrder)');
+        }
+        return respond(context, 200, { message: 'Standardleverantörer sparade' });
+      }
     }
 
     if (path === 'budget-versions') {
