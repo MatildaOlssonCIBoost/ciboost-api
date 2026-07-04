@@ -119,6 +119,22 @@ async function ensureSchemaColumns(db) {
           CreatedAt DATETIME DEFAULT GETDATE(),
           CONSTRAINT UQ_RevenueLinks UNIQUE (FromRevenueId, ToRevenueId)
         );
+      IF OBJECT_ID('RevenueRelations') IS NULL
+        CREATE TABLE RevenueRelations (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          RevenueId INT NOT NULL,
+          CustomerId INT NULL,
+          RelationType NVARCHAR(30) NOT NULL,
+          ChurnReason NVARCHAR(500) NULL,
+          RelatedRevenueId INT NULL,
+          DecisionDate DATE NULL,
+          CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          RegisteredBy NVARCHAR(100) NULL,
+          CONSTRAINT FK_RevRel_Revenue FOREIGN KEY (RevenueId) REFERENCES CustomerRevenues(Id) ON DELETE CASCADE,
+          CONSTRAINT UQ_RevRel_Revenue UNIQUE (RevenueId)
+        );
+      IF OBJECT_ID('RevenueRelations') IS NOT NULL AND COL_LENGTH('RevenueRelations','RegisteredBy') IS NULL ALTER TABLE RevenueRelations ADD RegisteredBy NVARCHAR(100) NULL;
       IF OBJECT_ID('BudgetMonthLocks') IS NULL
         CREATE TABLE BudgetMonthLocks (
           Id INT IDENTITY(1,1) PRIMARY KEY,
@@ -665,7 +681,18 @@ module.exports = async function (context, req) {
       }
     }
 
-    if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins') && !path.includes('/revenues')) {
+    // Revenue-relations för en kund (JOIN CustomerRevenues på CustomerId). Placeras FÖRE
+    // det generiska customers/-blocket (som annars tolkar det som customer-CRUD), som /revenues.
+    if (path.startsWith('customers/') && path.includes('/revenue-relations')) {
+      const customerId = path.split('/')[1];
+      if (method === 'GET') {
+        const result = await db.request().input('CustomerId', sql.Int, customerId)
+          .query('SELECT rr.* FROM RevenueRelations rr JOIN CustomerRevenues cr ON cr.Id = rr.RevenueId WHERE cr.CustomerId=@CustomerId');
+        return respond(context, 200, result.recordset);
+      }
+    }
+
+    if (path.startsWith('customers/') && !path.includes('/teams') && !path.includes('/admins') && !path.includes('/revenues') && !path.includes('/revenue-relations')) {
       const id = path.split('/')[1];
       if (method === 'PUT') {
         const c = req.body;
@@ -1269,6 +1296,41 @@ module.exports = async function (context, req) {
         calibration, misclassified, confusionMatrix: matrix, factorContribution,
         weightsLocked: totalOutcomes < 20, suggestedWeights, outcomesNeeded: Math.max(0, 20 - totalOutcomes)
       });
+    }
+
+    // ─── RevenueRelations (churn/upgrade/downgrade per intäktspost) ───
+    // Top-level routes. Tabellen self-healas i ensureSchemaColumns. Keyad på RevenueId (UNIQUE).
+    if (path === 'revenue-relations') {
+      if (method === 'GET') {
+        const result = await db.request().query('SELECT * FROM RevenueRelations');
+        return respond(context, 200, result.recordset);
+      }
+      if (method === 'POST') {
+        const b = req.body || {};
+        if (b.revenueId == null || !b.relationType) return respond(context, 400, { message: 'revenueId och relationType krävs' });
+        await db.request()
+          .input('RevenueId', sql.Int, b.revenueId)
+          .input('CustomerId', sql.Int, b.customerId != null ? b.customerId : null)
+          .input('RelationType', sql.NVarChar(30), b.relationType)
+          .input('ChurnReason', sql.NVarChar(500), b.churnReason != null ? b.churnReason : null)
+          .input('RelatedRevenueId', sql.Int, b.relatedRevenueId != null ? b.relatedRevenueId : null)
+          .input('DecisionDate', sql.Date, b.decisionDate || null)
+          .input('RegisteredBy', sql.NVarChar(100), b.registeredBy != null ? b.registeredBy : null)
+          .query(`MERGE RevenueRelations AS t
+                  USING (SELECT @RevenueId AS RevenueId) AS s ON t.RevenueId = s.RevenueId
+                  WHEN MATCHED THEN UPDATE SET CustomerId=@CustomerId, RelationType=@RelationType, ChurnReason=@ChurnReason, RelatedRevenueId=@RelatedRevenueId, DecisionDate=@DecisionDate, RegisteredBy=@RegisteredBy, UpdatedAt=SYSUTCDATETIME()
+                  WHEN NOT MATCHED THEN INSERT (RevenueId,CustomerId,RelationType,ChurnReason,RelatedRevenueId,DecisionDate,RegisteredBy)
+                    VALUES (@RevenueId,@CustomerId,@RelationType,@ChurnReason,@RelatedRevenueId,@DecisionDate,@RegisteredBy);`);
+        return respond(context, 200, { message: 'Sparad', revenueId: b.revenueId });
+      }
+    }
+    if (path.startsWith('revenue-relations/')) {
+      const revenueId = path.split('/')[1];
+      if (method === 'DELETE') {
+        await db.request().input('RevenueId', sql.Int, revenueId)
+          .query('DELETE FROM RevenueRelations WHERE RevenueId=@RevenueId');
+        return respond(context, 200, { message: 'Borttagen', revenueId });
+      }
     }
 
     return respond(context, 404, { message: 'Endpoint hittades inte' });
