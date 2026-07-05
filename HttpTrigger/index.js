@@ -106,6 +106,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('Prospects','ValueMin') IS NULL ALTER TABLE Prospects ADD ValueMin INT NULL;
       IF COL_LENGTH('Prospects','ValueMax') IS NULL ALTER TABLE Prospects ADD ValueMax INT NULL;
       IF COL_LENGTH('Prospects','LostReason') IS NULL ALTER TABLE Prospects ADD LostReason NVARCHAR(100) NULL;
+      IF COL_LENGTH('Prospects','Starred') IS NULL ALTER TABLE Prospects ADD Starred BIT NULL;
       IF COL_LENGTH('Customers','ParentCompany') IS NULL ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
       IF COL_LENGTH('Customers','Employees') IS NULL ALTER TABLE Customers ADD Employees INT NULL;
       IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
@@ -361,6 +362,20 @@ module.exports = async function (context, req) {
         await db.request().input('Id', sql.Int, revenueId)
           .query('DELETE FROM ProspectRevenues WHERE Id=@Id');
         return respond(context, 200, { message: 'Borttagen' });
+      }
+    }
+
+    // PUT /prospects/{id}/starred – smal toggle, skriver bara Starred (måste ligga
+    // FÖRE det generiska prospects/{id}-blocket så helobjekt-PUT:en inte fångar den).
+    if (path.startsWith('prospects/') && path.endsWith('/starred')) {
+      const pid = path.split('/')[1];
+      if (method === 'PUT') {
+        const starred = req.body && req.body.starred ? 1 : 0;
+        await db.request()
+          .input('Id', sql.Int, pid)
+          .input('Starred', sql.Bit, starred)
+          .query('UPDATE Prospects SET Starred=@Starred WHERE Id=@Id');
+        return respond(context, 200, { id: parseInt(pid), starred: !!starred });
       }
     }
 
