@@ -107,6 +107,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('Prospects','ValueMax') IS NULL ALTER TABLE Prospects ADD ValueMax INT NULL;
       IF COL_LENGTH('Prospects','LostReason') IS NULL ALTER TABLE Prospects ADD LostReason NVARCHAR(100) NULL;
       IF COL_LENGTH('Prospects','Starred') IS NULL ALTER TABLE Prospects ADD Starred BIT NULL;
+      IF COL_LENGTH('Prospects','Track') IS NULL ALTER TABLE Prospects ADD Track NVARCHAR(200) NULL;
       IF COL_LENGTH('Customers','ParentCompany') IS NULL ALTER TABLE Customers ADD ParentCompany NVARCHAR(200) NULL;
       IF COL_LENGTH('Customers','Employees') IS NULL ALTER TABLE Customers ADD Employees INT NULL;
       IF COL_LENGTH('Customers','Industry') IS NULL ALTER TABLE Customers ADD Industry NVARCHAR(100) NULL;
@@ -376,6 +377,20 @@ module.exports = async function (context, req) {
           .input('Starred', sql.Bit, starred)
           .query('UPDATE Prospects SET Starred=@Starred WHERE Id=@Id');
         return respond(context, 200, { id: parseInt(pid), starred: !!starred });
+      }
+    }
+
+    // PUT /prospects/{id}/track – smal, skriver bara Track (måste ligga
+    // FÖRE det generiska prospects/{id}-blocket så helobjekt-PUT:en inte fångar den).
+    if (path.startsWith('prospects/') && path.endsWith('/track')) {
+      const pid = path.split('/')[1];
+      if (method === 'PUT') {
+        const track = (req.body && typeof req.body.track === 'string' && req.body.track.trim()) ? req.body.track.trim() : null;
+        await db.request()
+          .input('Id', sql.Int, pid)
+          .input('Track', sql.NVarChar(200), track)
+          .query('UPDATE Prospects SET Track=@Track WHERE Id=@Id');
+        return respond(context, 200, { id: parseInt(pid), track: track });
       }
     }
 
