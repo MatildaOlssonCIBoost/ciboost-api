@@ -196,6 +196,15 @@ async function ensureSchemaColumns(db) {
           Clumping NVARCHAR(10) NULL,
           SortOrder INT NULL
         );
+      IF OBJECT_ID('BudgetMemory','U') IS NULL
+        CREATE TABLE BudgetMemory (
+          VersionId INT NOT NULL,
+          MemoryKey NVARCHAR(100) NOT NULL,
+          JsonValue NVARCHAR(MAX) NOT NULL,
+          UpdatedAt DATETIME2 DEFAULT SYSUTCDATETIME(),
+          UpdatedBy NVARCHAR(100) NULL,
+          CONSTRAINT PK_BudgetMemory PRIMARY KEY (VersionId, MemoryKey)
+        );
     `);
     // Idempotent backfill av befintliga RenewedFromId-länkar → RevenueLinks. Separat
     // batch så INSERT:en parsas mot en tabell som redan finns (undviker forward-
@@ -256,6 +265,9 @@ async function insertRiskSnapshot(db, row) {
             OUTPUT INSERTED.Id, INSERTED.CreatedAt
             VALUES (@CustomerId,@TriggerType,@Score,@RiskLevel,@RenewalProb,@StepBase,@Satisfaction,@ActivityLevel,@Economy,@Focus,@DaysToLicenseEnd)`);
 }
+
+// BudgetMemory: tillåtna nyckel-prefix för PUT/DELETE (utöka listan här vid nya minnestyper).
+const BUDGET_MEMORY_KEY_PREFIXES = ['avtalSnapshot', 'fornyelsePeriods', 'pipelineSnapshot', 'openingCash'];
 
 module.exports = async function (context, req) {
   const method = req.method.toUpperCase();
@@ -1144,6 +1156,51 @@ module.exports = async function (context, req) {
           removed += dr.rowsAffected[0] || 0;
         }
         return respond(context, 200, { message: 'Antaganden sparade', count: assumptions.length, removed });
+      }
+    }
+
+    // Delat import-/urvalsminne per budgetversion (BudgetMemory, generisk KV). GET alla för versionen;
+    // PUT/DELETE en whitelistad nyckel. last-write-wins. Isolerat per (VersionId, MemoryKey).
+    if (path.startsWith('budget-memory')) {
+      const parts = path.split('/');            // budget-memory/{versionId}/{memoryKey}
+      const versionId = parts[1];
+      const memoryKey = parts.slice(2).join('/');
+      if (!/^[0-9]+$/.test(String(versionId || ''))) return respond(context, 400, { message: 'versionId måste vara numeriskt' });
+
+      if (method === 'GET') {
+        const result = await db.request().input('VersionId', sql.Int, versionId)
+          .query('SELECT MemoryKey, JsonValue FROM BudgetMemory WHERE VersionId=@VersionId');
+        const out = {};
+        for (const r of result.recordset) { try { out[r.MemoryKey] = JSON.parse(r.JsonValue); } catch (e) { out[r.MemoryKey] = null; } }
+        return respond(context, 200, out);
+      }
+
+      // PUT/DELETE kräver en whitelistad nyckel.
+      if (!memoryKey) return respond(context, 400, { message: 'memoryKey krävs' });
+      if (!BUDGET_MEMORY_KEY_PREFIXES.some(p => memoryKey.startsWith(p))) return respond(context, 400, { message: 'memoryKey ej tillåten (whitelist)' });
+
+      if (method === 'PUT') {
+        const json = JSON.stringify(req.body != null ? req.body : null);
+        if (json.length > 500000) return respond(context, 413, { message: 'JsonValue för stort (max ~500KB)' });
+        const updatedBy = req.headers['x-ms-client-principal-name'] || null;
+        await db.request()
+          .input('VersionId', sql.Int, versionId)
+          .input('MemoryKey', sql.NVarChar, memoryKey)
+          .input('JsonValue', sql.NVarChar(sql.MAX), json)
+          .input('UpdatedBy', sql.NVarChar, updatedBy)
+          .query(`IF EXISTS (SELECT 1 FROM BudgetMemory WHERE VersionId=@VersionId AND MemoryKey=@MemoryKey)
+                    UPDATE BudgetMemory SET JsonValue=@JsonValue, UpdatedAt=SYSUTCDATETIME(), UpdatedBy=@UpdatedBy WHERE VersionId=@VersionId AND MemoryKey=@MemoryKey
+                  ELSE
+                    INSERT INTO BudgetMemory (VersionId,MemoryKey,JsonValue,UpdatedBy) VALUES (@VersionId,@MemoryKey,@JsonValue,@UpdatedBy)`);
+        return respond(context, 200, { message: 'Minne sparat' });
+      }
+
+      if (method === 'DELETE') {
+        const dr = await db.request()
+          .input('VersionId', sql.Int, versionId)
+          .input('MemoryKey', sql.NVarChar, memoryKey)
+          .query('DELETE FROM BudgetMemory WHERE VersionId=@VersionId AND MemoryKey=@MemoryKey');
+        return respond(context, 200, { message: 'Minne raderat', removed: dr.rowsAffected[0] || 0 });
       }
     }
 
