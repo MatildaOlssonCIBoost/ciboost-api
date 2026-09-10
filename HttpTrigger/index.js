@@ -172,6 +172,7 @@ async function ensureSchemaColumns(db) {
       IF COL_LENGTH('CustomerRevenues','AccrualTo') IS NULL ALTER TABLE CustomerRevenues ADD AccrualTo DATE NULL;
       IF COL_LENGTH('CustomerRevenues','InvoiceNumber') IS NULL ALTER TABLE CustomerRevenues ADD InvoiceNumber NVARCHAR(50) NULL;
       IF COL_LENGTH('CustomerRevenues','ExpectedPaymentDate') IS NULL ALTER TABLE CustomerRevenues ADD ExpectedPaymentDate DATE NULL;
+      IF COL_LENGTH('CustomerRevenues','SoldBy') IS NULL ALTER TABLE CustomerRevenues ADD SoldBy NVARCHAR(100) NULL;
       IF COL_LENGTH('ProspectRevenues','VatRate') IS NULL ALTER TABLE ProspectRevenues ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('BudgetImportAssumptions','VatRate') IS NULL ALTER TABLE BudgetImportAssumptions ADD VatRate DECIMAL(5,2) NULL;
       IF COL_LENGTH('BudgetRows','AccountNo') IS NULL ALTER TABLE BudgetRows ADD AccountNo NVARCHAR(20) NULL;
@@ -676,7 +677,8 @@ module.exports = async function (context, req) {
           .input('AccrualTo', sql.Date, r.accrualTo || null)
           .input('InvoiceNumber', sql.NVarChar, r.invoiceNumber != null ? r.invoiceNumber : null)
           .input('ExpectedPaymentDate', sql.Date, r.expectedPaymentDate || null)
-          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate,VatRate,RenewedFromId,AccrualFrom,AccrualTo,InvoiceNumber,ExpectedPaymentDate) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate,@VatRate,@RenewedFromId,@AccrualFrom,@AccrualTo,@InvoiceNumber,@ExpectedPaymentDate)');
+          .input('SoldBy', sql.NVarChar, r.soldBy != null ? r.soldBy : null)
+          .query('INSERT INTO CustomerRevenues (CustomerId,Type,Amount,DateFrom,DateTo,Description,InvoiceDate,Paid,PaymentDate,VatRate,RenewedFromId,AccrualFrom,AccrualTo,InvoiceNumber,ExpectedPaymentDate,SoldBy) VALUES (@CustomerId,@Type,@Amount,@DateFrom,@DateTo,@Description,@InvoiceDate,@Paid,@PaymentDate,@VatRate,@RenewedFromId,@AccrualFrom,@AccrualTo,@InvoiceNumber,@ExpectedPaymentDate,@SoldBy)');
         const inserted = await db.request().input('CustomerId', sql.Int, customerId)
           .query('SELECT TOP 1 Id FROM CustomerRevenues WHERE CustomerId=@CustomerId ORDER BY CreatedAt DESC');
         return respond(context, 201, { message: 'Intäkt sparad', id: inserted.recordset[0]?.Id });
@@ -715,6 +717,7 @@ module.exports = async function (context, req) {
         if (r.accrualTo !== undefined) { accrualSet.push('AccrualTo=@AccrualTo'); accReq.input('AccrualTo', sql.Date, r.accrualTo || null); }
         if (r.invoiceNumber !== undefined) { accrualSet.push('InvoiceNumber=@InvoiceNumber'); accReq.input('InvoiceNumber', sql.NVarChar, r.invoiceNumber != null ? r.invoiceNumber : null); }
         if (r.expectedPaymentDate !== undefined) { accrualSet.push('ExpectedPaymentDate=@ExpectedPaymentDate'); accReq.input('ExpectedPaymentDate', sql.Date, r.expectedPaymentDate || null); }
+        if (r.soldBy !== undefined) { accrualSet.push('SoldBy=@SoldBy'); accReq.input('SoldBy', sql.NVarChar, r.soldBy != null ? r.soldBy : null); }
         if (accrualSet.length) await accReq.query(`UPDATE CustomerRevenues SET ${accrualSet.join(',')} WHERE Id=@Id`);
         return respond(context, 200, { message: 'Uppdaterad' });
       }
