@@ -272,7 +272,9 @@ async function insertRiskSnapshot(db, row) {
 }
 
 // BudgetMemory: tillåtna nyckel-prefix för PUT/DELETE (utöka listan här vid nya minnestyper).
-const BUDGET_MEMORY_KEY_PREFIXES = ['avtalSnapshot', 'fornyelsePeriods', 'pipelineSnapshot', 'openingCash', 'importedActuals'];
+// revDiff = ändringsvarningarnas startpunkter (revDiffBaseline) + manuellt borttagna poster (revDiffRemoved);
+// vfResultatSnapshot = Vidarefakturering-resultatimportens urval (användes redan men saknades här → sparades bara lokalt).
+const BUDGET_MEMORY_KEY_PREFIXES = ['avtalSnapshot', 'fornyelsePeriods', 'pipelineSnapshot', 'openingCash', 'importedActuals', 'vfResultatSnapshot', 'revDiff'];
 
 module.exports = async function (context, req) {
   const method = req.method.toUpperCase();
